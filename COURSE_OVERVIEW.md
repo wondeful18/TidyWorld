@@ -1,6 +1,6 @@
 # TinyWorld · 课程总览
 
-**Small Engine, Complete World.** TinyWorld 是一个持续演进的 C++20 游戏引擎教学工程。课程用 19 章从空目录里的 Hello World 开始，最终交付一张可以用第三人称角色探索的原创山谷与海岸地图。学过基本 C++ 语法就可以开始。编译、构建和游戏开发中用到的数学会在第一次使用时介绍。
+**Small Engine, Complete World.** TinyWorld 是一个持续演进的 C++20 游戏引擎教学工程。课程用 19 章从一扇原生空窗口开始，最终交付一张可以用第三人称角色探索的原创山谷与海岸地图。学过基本 C++ 语法就可以开始。构建方式和游戏开发中用到的数学会在第一次使用时介绍。
 
 ## AI 协作入口
 
@@ -8,7 +8,7 @@
 2. 在路线图中查看本章的先修内容、必做功能、验收标准和扩展实验。 [19 章详细路线](Docs/roadmap-19-chapters.md)
 3. 开发第 1 章时，按 Milestone 0–5 实施与验证。 [第一章开工提示词](Docs/ch01-kickoff-prompt.md)
 
-**当前实现范围为第 1–2 章。** 第 1 章先手动编译 Hello World，再加 CMake、GLFW、WebGPU 和 ImGui。第 2 章接着加摄像机、深度、Lambert 光照和变换编辑，最后用小车漫游小屋、树和草地。平台构建、GPU 回读和交互记录见各章教程。 [第 01 章教程](Chapters/ch01/README.md) · [第 02 章教程](Chapters/ch02/README.md)
+**当前实现范围为第 1–2 章。** 第 1 章从 Step 1 的 GLFW 空窗口开始，用 CMake 生成 Visual Studio 或 Xcode 工程，再加 WebGPU 和 ImGui。第 2 章接着加摄像机、深度、Lambert 光照和变换编辑，最后用小车漫游小屋、树和草地。平台构建、GPU 回读和交互记录见各章教程。 [第 01 章教程](Chapters/ch01/README.md) · [第 02 章教程](Chapters/ch02/README.md)
 
 前几章从上一步的可运行结果接着做。第 1 章的每一步都有源码或正式工程入口。第 2 章先从上一章的三角形复习顶点与绘制，再依次增加相机与深度、光照与编辑、漫游。第 3 章沿用同一个场景，逐节增加阴影、天空背景和车身反射。 [第 1 章分步源码](Chapters/ch01/src/README.md)
 
@@ -23,7 +23,7 @@
 
 | 章 | 学习成果 |
 | --- | --- |
-| 01 | 从空目录编译 Hello World，用 CMake 重建，再加 GLFW 窗口、WebGPU 清屏、彩色三角形和 ImGui 视口。 |
+| 01 | 用 CMake 生成 GLFW 空窗口的工程，依次加入 WebGPU 清屏、彩色三角形和 ImGui 视口。 |
 | 02 | 搭建房子、树和地面，加入相机、材质、方向光与 Transform 编辑。开一辆低模小车，观察相机如何随车移动。 |
 | 03 | 实现单张 Shadow Map、PCF 和阴影偏移，再比较天空盒与天空球，并把环境贴图采样到车身反射上。 |
 | 04 | 保存和重开 JSON 场景，通过固定步长角色控制体验行走跳跃，用 Lua 响应事件。 |

@@ -1,33 +1,31 @@
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
+#include "DirectFrame.h"
+
+#include "Engine/Core/Log.h"
+#include "Engine/Platform/ExecutablePath.h"
+#include "Engine/Platform/Window.h"
+#include "Engine/Renderer/TriangleRenderer.h"
+#include "Engine/Renderer/WebGpuContext.h"
 
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 
 //————————————————————————————————————————————————————————————————————————————————
-// 创建一扇没有图形 API 上下文的原生窗口，等待关闭事件后释放它。
+// 在上一步的帧循环里加入顶点、WGSL 和 Pipeline，直接呈现彩色三角形。
 //————————————————————————————————————————————————————————————————————————————————
-int main() {
-    if (!glfwInit()) {
-        std::cerr << "GLFW initialization failed\n";
-        return EXIT_FAILURE;
-    }
+int main() try {
+    using namespace tinyworld;
+    Log log;
+    Window window("TinyWorld - First Triangle");
+    WebGpuContext gpu(window, log);
 
-    // 下一步会由 WebGPU 为这个原生窗口创建呈现目标。
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(640, 480, "TinyWorld - First Window", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Window creation failed\n";
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
-    std::cout << "GLFW window ready" << std::endl;
-    while (!glfwWindowShouldClose(window)) {
-        glfwWaitEvents();
-    }
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    // 初始化时上传顶点和编译 WGSL，每帧复用同一组资源。
+    TriangleRenderer triangle(gpu, gpu.SurfaceFormat(), ExecutableDirectory() / "triangle.wgsl");
+    RunDirectFrames(window, gpu, log, [&](WGPUCommandEncoder encoder, WGPUTextureView target) {
+        triangle.Encode(encoder, target);
+    });
     return EXIT_SUCCESS;
+} catch (const std::exception& error) {
+    std::cerr << error.what() << '\n';
+    return EXIT_FAILURE;
 }

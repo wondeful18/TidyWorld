@@ -16,21 +16,21 @@
 - 按职责拆分窗口、WebGPU 上下文、平台桥接、三角形绘制和场景视口的源文件。自有代码的类和函数在中文多行头注释上下各放一整行 `//————————————————————————————————————————————————————————————————————————————————`。关键逻辑加中文注释，每个类数据成员的声明行尾附中文说明。 [格式与示例](../COURSE_OVERVIEW.md)
 - 把本轮工程范围限制为第一章。Scene Viewport、Console 与 Statistics 有可验证功能。Statistics 显示 CPU 帧时、帧率和渲染尺寸。Hierarchy 与 Inspector 提供后续接入点。后续的场景对象、资产浏览、Lua、地形、脚本和物理沿课程路线加入。
 
-## Milestone 0 · 从空目录建立构建基线
+## Milestone 0 · 建立窗口工程的构建基线
 
-先在 `Chapters/ch01/src/step1` 用一份 `main.cpp` 手动编译 Hello World，再在 `step2` 加入 CMake 和 Ninja 并取得相同输出。正式工程另行设置按平台区分的 Debug、Release preset 和 vcpkg 清单。将 wgpu-native 发行包锁定与导入规则集中在一个可供分步工程复用的 CMake 文件。macOS 将需要 Cocoa 的官方 ImGui 后端源码按 Objective-C++ 编译，Windows 启用相同的官方 WebGPU 后端配置并检查 DLL 部署。
+从 `Chapters/ch01/src/step1` 开始。用 GLFW 窗口的 `CMakeLists.txt` 讲解目标、依赖和生成器，给出生成 Visual Studio 解决方案与 Xcode 工程的命令。正式工程继续使用按平台区分的 Debug、Release preset 和 vcpkg 清单。将 wgpu-native 发行包锁定与导入规则集中在一个可供分步工程复用的 CMake 文件。macOS 将需要 Cocoa 的官方 ImGui 后端源码按 Objective-C++ 编译，Windows 启用相同的官方 WebGPU 后端配置并检查 DLL 部署。
 
 从全新构建目录实际配置并编译链接一个最小目标，验证候选依赖可以找到并使用。执行 Apple/Windows 各自可运行环境下的最小 GPU 初始化探查。工具缺失时优先采用项目本地的可复现安装路径，再依据可用性报告确切阻塞。补齐根 README、`Docs/architecture.md` 与 `Docs/Decisions/` 中对应的依赖及架构记录，同步维护既有课程路线。
 
 ## Milestone 1–3 · 窗口到直接呈现
 
-1. 在 `step3` 单独引入 GLFW，创建 `GLFW_NO_API` 窗口，验收打开、等待事件与关闭。进入渲染阶段时分别使用窗口逻辑尺寸和 framebuffer 像素尺寸，零尺寸期间跳过 Surface 获取和绘制。
-2. 在 `step4` 通过平台桥接创建 Surface，依次请求 Adapter、Device、Queue，先提交并呈现一次纯色清屏。给异步请求设置错误报告和有限等待，保证回调状态生命周期正确。
-3. 在 `step5` 沿用窗口和帧循环，加入顶点缓冲、WGSL 和 Pipeline，呈现彩色三角形。区分 timeout、outdated、Surface lost、Device lost 和正常销毁。Surface 可恢复状态尝试有界恢复，Device Lost 记录后有序退出。真实检查直接三角形、拖动窗口和最小化恢复，之后再接 UI。
+1. 在 `step1` 单独引入 GLFW，创建 `GLFW_NO_API` 窗口，验收打开、等待事件与关闭。进入渲染阶段时分别使用窗口逻辑尺寸和 framebuffer 像素尺寸，零尺寸期间跳过 Surface 获取和绘制。
+2. 在 `step2` 通过平台桥接创建 Surface，依次请求 Adapter、Device、Queue，先提交并呈现一次纯色清屏。给异步请求设置错误报告和有限等待，保证回调状态生命周期正确。
+3. 在 `step3` 沿用窗口和帧循环，加入顶点缓冲、WGSL 和 Pipeline，呈现彩色三角形。区分 timeout、outdated、Surface lost、Device lost 和正常销毁。Surface 可恢复状态尝试有界恢复，Device Lost 记录后有序退出。真实检查直接三角形、拖动窗口和最小化恢复，之后再接 UI。
 
 ## Milestone 4 · DockSpace 与离屏视口
 
-在 `step6` 导读正式工程，使用官方 GLFW 和 WebGPU 后端启用单窗口 Docking。在同一 GPU 设备上，先把三角形绘制到具备 `RenderAttachment` 与 `TextureBinding` usage 的离屏纹理，再通过 ImGui 合成通道呈现。按固定版本的绑定契约将 `WGPUTextureView` 提交给 ImGui，视图在 UI 命令编码与提交期间保持有效。
+在 `step4` 导读正式工程，使用官方 GLFW 和 WebGPU 后端启用单窗口 Docking。在同一 GPU 设备上，先把三角形绘制到具备 `RenderAttachment` 与 `TextureBinding` usage 的离屏纹理，再通过 ImGui 合成通道呈现。按固定版本的绑定契约将 `WGPUTextureView` 提交给 ImGui，视图在 UI 命令编码与提交期间保持有效。
 
 按视口逻辑区域与 framebuffer 缩放得到离屏像素尺寸，尺寸变化才重建纹理。处理折叠、零面积与恢复。明确颜色纹理格式和输出转换。根据 ImGui capture 和视口焦点区分 UI 输入与场景输入。验证调整主窗口和 Dock 边界、最小化恢复、关闭退出，保存真实截图。
 

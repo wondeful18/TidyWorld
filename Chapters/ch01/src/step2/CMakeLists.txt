@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
-project(HelloWorld LANGUAGES CXX)
+# 沿用上一步的 GLFW 清单，额外依赖由 DirectStep.cmake 管理。
+set(VCPKG_MANIFEST_DIR "${CMAKE_CURRENT_LIST_DIR}/../step1")
+project(FirstClear LANGUAGES CXX)
 
-add_executable(hello main.cpp)
-target_compile_features(hello PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(hello PRIVATE /utf-8)
-endif()
+include(../common/DirectStep.cmake)
+add_direct_step(first_clear)

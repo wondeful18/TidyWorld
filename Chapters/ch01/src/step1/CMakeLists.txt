@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.24)
+project(FirstWindow LANGUAGES CXX)
+
+find_package(glfw3 3.5.1 EXACT CONFIG REQUIRED)
+add_executable(first_window main.cpp)
+target_compile_features(first_window PRIVATE cxx_std_20)
+target_link_libraries(first_window PRIVATE glfw)
+if(MSVC)
+    target_compile_options(first_window PRIVATE /utf-8)
+endif()
+
+if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+    set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT first_window)
+elseif(CMAKE_GENERATOR STREQUAL "Xcode")
+    set_target_properties(first_window PROPERTIES XCODE_GENERATE_SCHEME TRUE)
+endif()

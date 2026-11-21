@@ -1,6 +1,6 @@
 # TinyWorld
 
-Small Engine, Complete World. 一个从 Hello World 逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01 章和第 02 章。
+Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01 章和第 02 章。
 
 ![第二章场景的 GPU 回读画面，草地上有一间小屋和一棵树](Chapters/ch02/image/scene.png)
 
@@ -8,14 +8,14 @@ Small Engine, Complete World. 一个从 Hello World 逐步构建到可探索山�
 
 | 章节 | 内容 | 教程 | PDF |
 | --- | --- | --- | --- |
-| 01 | 从 Hello World 到第一个三角形 | [从空目录开始](Chapters/ch01/README.md) · [分步源码与 Visual Studio 解决方案](Chapters/ch01/src/README.md) | [第 01 章](Chapters/ch01/ch01.pdf) |
+| 01 | 从空窗口到第一个三角形 | [从 Step 1 开始](Chapters/ch01/README.md) · [分步源码与工程入口](Chapters/ch01/src/README.md) | [第 01 章](Chapters/ch01/ch01.pdf) |
 | 02 | 第一间小屋，第一棵树 | [教程与运行步骤](Chapters/ch02/README.md) | [第 02 章](Chapters/ch02/ch02.pdf) |
 
 [课程总览](COURSE_OVERVIEW.md) · [19 章详细路线](Docs/roadmap-19-chapters.md) · [项目架构](Docs/architecture.md)
 
 ## 构建与运行完整工程
 
-按第 01 章准备 CMake 3.24 或更新版本、Ninja、C++20 编译器与 vcpkg，并设置 `VCPKG_ROOT`。在 macOS arm64 从仓库根目录使用以下命令。
+按第 01 章准备编译工具、CMake 与 vcpkg，并设置 `VCPKG_ROOT`。也可以安装 Ninja，在 macOS arm64 从仓库根目录使用以下命令。 [Visual Studio 和 Xcode 的工程生成方法](Chapters/ch01/README.md#step-1--用-cmake-打开第一扇窗口)
 
 ```sh
 cmake --preset macos-arm64-debug

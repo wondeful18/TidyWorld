@@ -90,6 +90,8 @@ if(CMAKE_GENERATOR MATCHES "^Visual Studio")
         get_target_property(sources ${target} SOURCES)
         source_group(TREE "${PROJECT_SOURCE_DIR}" FILES ${sources})
     endforeach()
+elseif(CMAKE_GENERATOR STREQUAL "Xcode")
+    set_target_properties(TinyWorld PROPERTIES XCODE_GENERATE_SCHEME TRUE)
 endif()
 
 add_executable(TinyWorldMeshPacker Tools/AssetTools/PackChapter02.cpp)

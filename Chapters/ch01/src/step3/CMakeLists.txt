@@ -1,10 +1,20 @@
 cmake_minimum_required(VERSION 3.24)
-project(FirstWindow LANGUAGES CXX)
+set(VCPKG_MANIFEST_DIR "${CMAKE_CURRENT_LIST_DIR}/../step1")
+project(FirstTriangle LANGUAGES CXX)
 
-find_package(glfw3 3.5.1 EXACT CONFIG REQUIRED)
-add_executable(first_window main.cpp)
-target_compile_features(first_window PRIVATE cxx_std_20)
-target_link_libraries(first_window PRIVATE glfw)
-if(MSVC)
-    target_compile_options(first_window PRIVATE /utf-8)
-endif()
+include(../common/DirectStep.cmake)
+add_direct_step(first_triangle)
+target_sources(first_triangle PRIVATE
+    "${tinyworld_root}/Engine/Platform/ExecutablePath.cpp"
+    "${tinyworld_root}/Engine/Renderer/ShaderModule.cpp"
+    "${tinyworld_root}/Engine/Renderer/TriangleRenderer.cpp"
+)
+
+# 每次构建检查 WGSL，修改着色器也会更新可执行文件旁的副本。
+add_custom_target(first_triangle_shader
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:first_triangle>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${tinyworld_root}/Assets/Shaders/triangle.wgsl" "$<TARGET_FILE_DIR:first_triangle>/triangle.wgsl"
+    VERBATIM
+)
+add_dependencies(first_triangle first_triangle_shader)

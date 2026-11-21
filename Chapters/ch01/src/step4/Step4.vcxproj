@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{D70F225B-B706-45DE-A6A5-C63642E3515C}</ProjectGuid>
+    <ProjectGuid>{4FB8EB7C-C612-4B94-B18E-7E469FA5AE17}</ProjectGuid>
     <Keyword>MakeFileProj</Keyword>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -24,17 +24,20 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
-    <StepTarget>first_clear</StepTarget>
+    <StepTarget>TinyWorld</StepTarget>
     <StepUsesVcpkg>true</StepUsesVcpkg>
+    <StepSourceDir>$(MSBuildProjectDirectory)\..\..\..\..</StepSourceDir>
+    <StepBinSubdir>bin\</StepBinSubdir>
+    <LocalDebuggerCommandArguments>--chapter 01</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <Import Project="..\common\StepCMake.props" />
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="..\common\DirectFrame.cpp" />
-    <ClCompile Include="$(RepoRoot)\Engine\Renderer\RenderPass.cpp" />
-    <ClInclude Include="..\common\DirectFrame.h" />
-    <None Include="CMakeLists.txt" />
-    <None Include="..\common\DirectStep.cmake" />
+    <ClCompile Include="$(RepoRoot)\Editor\main.cpp" />
+    <ClCompile Include="$(RepoRoot)\Editor\Application.cpp" />
+    <ClCompile Include="$(RepoRoot)\Editor\EditorUi.cpp" />
+    <ClCompile Include="$(RepoRoot)\Editor\SceneViewport.cpp" />
+    <None Include="$(RepoRoot)\CMakeLists.txt" />
+    <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
