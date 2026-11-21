@@ -15,7 +15,7 @@ namespace tinyworld {
 // 通过同一份预设函数恢复默认布局或构造两个视觉对照。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldEditor::DrawHierarchy() {
-    for (std::size_t index = 0; index < mScene.objects.size(); ++index) {
+    for (std::size_t index = 0; index < WorldScene::kCarIndex; ++index) {
         if (ImGui::Selectable(mScene.objects[index].name, mSelected == index)) {
             mSelected = index;
         }
@@ -34,6 +34,13 @@ void WorldEditor::DrawHierarchy() {
     ImGui::SameLine();
     if (ImGui::Button("Evening")) {
         mScene.ApplyPreset(WorldPreset::Evening);
+    }
+    const bool driving = mScene.IsDriving();
+    if (ImGui::Button(driving ? "Stop driving" : "Drive car")) {
+        mScene.SetDriving(!driving);
+        if (!driving) {
+            ImGui::SetWindowFocus("Scene Viewport");
+        }
     }
 }
 
@@ -77,10 +84,53 @@ void WorldEditor::DrawInspector() {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 按当前模式更新相机并在场景图片内显示对应操作提示。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::DrawViewport(PixelSize size, float deltaSeconds) {
+    const ImVec2 low = ImGui::GetItemRectMin();
+    const ImVec2 high = ImGui::GetItemRectMax();
+    auto* list = ImGui::GetWindowDrawList();
+    list->PushClipRect(low, high, true);
+    const bool driving = mScene.IsDriving();
+    if (driving) {
+        mOrbiting = false;
+        UpdateDrive(deltaSeconds);
+    } else {
+        DrawEditControls(size);
+    }
+    const char* hint = driving ? "WASD / Arrows: drive   R / Home: reset" : "Right drag: orbit   Wheel: zoom";
+    const ImVec2 label = ImGui::CalcTextSize(hint);
+    list->AddRectFilled({low.x + 10.0f, low.y + 10.0f}, {low.x + label.x + 26.0f, low.y + label.y + 22.0f},
+                        IM_COL32(25, 41, 47, 218), 5.0f);
+    list->AddText({low.x + 18.0f, low.y + 16.0f}, IM_COL32(240, 249, 248, 255), hint);
+    list->PopClipRect();
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 焦点离开视口时释放驾驶输入，让车自然减速。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::UpdateDrive(float deltaSeconds) {
+    CarInput input;
+    const auto& io = ImGui::GetIO();
+    if (ImGui::IsWindowFocused() && !ImGui::IsAnyItemActive() && !io.WantTextInput &&
+        !io.KeyCtrl && !io.KeyAlt && !io.KeySuper) {
+        // 方向键和 Home 在中文输入法开启时也可使用。
+        const bool forward = ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow);
+        const bool reverse = ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow);
+        const bool left = ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow);
+        const bool right = ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow);
+        input.throttle = static_cast<float>(forward - reverse);
+        input.steering = static_cast<float>(left - right);
+        input.reset = ImGui::IsKeyDown(ImGuiKey_R) || ImGui::IsKeyDown(ImGuiKey_Home);
+    }
+    mScene.UpdateDrive(input, deltaSeconds);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 右键和滚轮驱动相机，左键仍留给变换手柄。
 // 手柄使用与场景一致的视图与纵横比，只换用它所需的裁剪深度区间。
 //————————————————————————————————————————————————————————————————————————————————
-void WorldEditor::DrawViewport(PixelSize size) {
+void WorldEditor::DrawEditControls(PixelSize size) {
     const ImVec2 low = ImGui::GetItemRectMin();
     const ImVec2 high = ImGui::GetItemRectMax();
     const bool hovered = ImGui::IsItemHovered();
@@ -100,15 +150,13 @@ void WorldEditor::DrawViewport(PixelSize size) {
         camera.distance = std::clamp(camera.distance * std::exp(-0.095f * io.MouseWheel), 5.0f, 33.0f);
     }
 
-    auto* list = ImGui::GetWindowDrawList();
-    list->PushClipRect(low, high, true);
     if (mSelected && !mOrbiting) {
         auto& transform = mScene.objects[*mSelected].transform;
         glm::mat4 model = transform.Matrix();
         const glm::mat4 view = camera.View();
         const glm::mat4 project = camera.Projection(static_cast<float>(size.width) / size.height, false);
         ImGuizmo::SetOrthographic(false);
-        ImGuizmo::SetDrawlist(list);
+        ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
         ImGuizmo::SetRect(low.x, low.y, high.x - low.x, high.y - low.y);
         const auto operation = mRotate ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
         if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(project), operation,
@@ -123,12 +171,6 @@ void WorldEditor::DrawViewport(PixelSize size) {
             }
         }
     }
-    constexpr auto hint = "Right drag: orbit   Wheel: zoom";
-    const ImVec2 label = ImGui::CalcTextSize(hint);
-    list->AddRectFilled({low.x + 10.0f, low.y + 10.0f}, {low.x + label.x + 26.0f, low.y + label.y + 22.0f},
-                        IM_COL32(25, 41, 47, 218), 5.0f);
-    list->AddText({low.x + 18.0f, low.y + 16.0f}, IM_COL32(240, 249, 248, 255), hint);
-    list->PopClipRect();
 }
 
 }  // namespace tinyworld

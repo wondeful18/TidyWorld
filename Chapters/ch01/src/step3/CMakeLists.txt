@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.24)
+project(FirstWindow LANGUAGES CXX)
+
+find_package(glfw3 3.5.1 EXACT CONFIG REQUIRED)
+add_executable(first_window main.cpp)
+target_compile_features(first_window PRIVATE cxx_std_20)
+target_link_libraries(first_window PRIVATE glfw)
+if(MSVC)
+    target_compile_options(first_window PRIVATE /utf-8)
+endif()

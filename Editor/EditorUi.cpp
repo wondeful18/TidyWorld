@@ -118,7 +118,7 @@ void EditorUi::BuildFrame(const Log& log, PixelSize framebuffer, double frameInt
     }
     ImGui::End();
     if (world) {
-        mScene.Build(mDevice, world);
+        mScene.Build(mDevice, world, static_cast<float>(frameIntervalMs / 1000.0));
     }
     if (ImGui::Begin("Console")) {
         for (const auto& line : log.Snapshot()) {

@@ -4,6 +4,7 @@
 #include "Engine/Renderer/RenderPass.h"
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
+#include "Engine/Scene/RoamingCarMesh.h"
 #include "Engine/Scene/SceneMesh.h"
 
 #include <glm/matrix.hpp>
@@ -119,7 +120,9 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
     for (size_t i = 0; i < mDraws.size(); ++i) {
         const auto& object = scene.objects[i];
         auto& draw = mDraws[i];
-        const auto vertices = LoadSceneMesh(root / "models" / "ch02" / object.meshFile);
+        const auto vertices = object.meshFile
+            ? LoadSceneMesh(root / "models" / "ch02" / object.meshFile)
+            : MakeRoamingCarMesh();
         draw.count = static_cast<std::uint32_t>(vertices.size());
         const auto bytes = vertices.size() * sizeof(SceneVertex);
         draw.vertices = MakeBuffer(gpu.Device(), WGPUBufferUsage_Vertex, bytes, object.name);
@@ -171,12 +174,14 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
 void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size,
                            const WorldScene& scene) {
     ResizeDepth(size);
-    const glm::mat4 vp = scene.camera.Projection(static_cast<float>(size.width) / size.height) * scene.camera.View();
+    const auto& camera = scene.ActiveCamera();
+    const glm::mat4 vp = camera.Projection(static_cast<float>(size.width) / size.height) * camera.View();
     const glm::vec4 direction(scene.sun.TowardLight(), 0.0f);
     const glm::vec4 sun(scene.sun.color * scene.sun.intensity, 0.0f);
     auto pass = BeginColorPass(encoder, target, mClearColor, "Chapter 02 world pass", mDepthView.get());
     wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
-    for (size_t i = 0; i < mDraws.size(); ++i) {
+    const std::size_t visibleCount = scene.IsDriving() ? mDraws.size() : WorldScene::kCarIndex;
+    for (std::size_t i = 0; i < visibleCount; ++i) {
         const auto& draw = mDraws[i];
         const glm::mat4 model = scene.objects[i].transform.Matrix();
         const DrawUniform uniforms{vp, model, glm::transpose(glm::inverse(model)), direction, sun};

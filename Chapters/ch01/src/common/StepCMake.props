@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\..'))</RepoRoot>
+    <StepSourceDir Condition="'$(StepSourceDir)' == ''">$(MSBuildProjectDirectory)</StepSourceDir>
+    <StepBuildDir>$(MSBuildProjectDirectory)\build\vs2022</StepBuildDir>
+    <OutDir>$(StepBuildDir)\$(StepBinSubdir)$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\build\obj\$(Configuration)\</IntDir>
+
+    <StepCMakeExe Condition="Exists('$(VSInstallDir)Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe')">$(VSInstallDir)Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</StepCMakeExe>
+    <StepCMakeExe Condition="'$(StepCMakeExe)' == ''">cmake</StepCMakeExe>
+    <StepVcpkgRoot Condition="'$(VCPKG_ROOT)' != ''">$(VCPKG_ROOT)</StepVcpkgRoot>
+    <StepVcpkgRoot Condition="'$(StepVcpkgRoot)' == ''">$(RepoRoot)\.tools\vcpkg</StepVcpkgRoot>
+    <StepVcpkgOptions Condition="'$(StepUsesVcpkg)' == 'true'">"-DCMAKE_TOOLCHAIN_FILE=$(StepVcpkgRoot)\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows</StepVcpkgOptions>
+
+    <StepConfigure>"$(StepCMakeExe)" -S "$(StepSourceDir)" -B "$(StepBuildDir)" -G "Visual Studio 17 2022" -A x64 $(StepVcpkgOptions)</StepConfigure>
+    <StepBuild>"$(StepCMakeExe)" --build "$(StepBuildDir)" --config $(Configuration) --target $(StepTarget)</StepBuild>
+    <NMakeBuildCommandLine>$(StepConfigure) &amp;&amp; $(StepBuild)</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>$(StepConfigure) &amp;&amp; $(StepBuild) --clean-first</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>if exist "$(StepBuildDir)\CMakeCache.txt" "$(StepCMakeExe)" --build "$(StepBuildDir)" --config $(Configuration) --target clean</NMakeCleanCommandLine>
+    <NMakeOutput>$(OutDir)$(StepTarget).exe</NMakeOutput>
+    <NMakeIncludeSearchPath>$(RepoRoot);$(MSBuildThisFileDirectory);$(StepBuildDir)\vcpkg_installed\x64-windows\include;$(StepBuildDir)\_deps\wgpu_native-src\include;$(StepBuildDir)\_deps\dear_imgui-src;$(StepBuildDir)\_deps\dear_imgui-src\backends;$(StepBuildDir)\_deps\imguizmo-src\src</NMakeIncludeSearchPath>
+    <AdditionalOptions>/std:c++20 /utf-8</AdditionalOptions>
+
+    <LocalDebuggerCommand>$(NMakeOutput)</LocalDebuggerCommand>
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+</Project>

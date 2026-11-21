@@ -19,7 +19,7 @@ public:
     // 测量面板空间并提交图片控件。
     // 面板可见时才根据 framebuffer 比例准备离屏纹理。
     //————————————————————————————————————————————————————————————————————————————————
-    void Build(WGPUDevice device, WorldEditor* world = nullptr);
+    void Build(WGPUDevice device, WorldEditor* world = nullptr, float deltaSeconds = 0.0f);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 返回本帧要绘入的场景目标，折叠或隐藏时为空。

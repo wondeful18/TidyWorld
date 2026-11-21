@@ -27,7 +27,7 @@ namespace {
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldDemo {
     WorldScene scene;       // 编辑器与渲染器共同使用的场景
-    WorldRenderer renderer; // 三个模型与深度绘制管线
+    WorldRenderer renderer; // 场景模型与深度绘制管线
     WorldEditor editor;    // 借用本对象的场景并接入 ImGui
 
     //————————————————————————————————————————————————————————————————————————————————
@@ -38,9 +38,48 @@ struct WorldDemo {
         : renderer(gpu, format, scene, root), editor(scene) {
         scene.ApplyPreset(preset);
     }
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
+    //————————————————————————————————————————————————————————————————————————————————
+    WorldDemo(const WorldDemo&) = delete;
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 场景通过预设原地更新，整套演示对象在应用中保持固定地址。
+    //————————————————————————————————————————————————————————————————————————————————
+    WorldDemo& operator=(const WorldDemo&) = delete;
 };
 
 using Demo = std::variant<TriangleRenderer, WorldDemo>;
+
+//————————————————————————————————————————————————————————————————————————————————
+// 直接在返回的 variant 中构造选中的章节，避免搬动含有场景引用的演示。
+//————————————————————————————————————————————————————————————————————————————————
+Demo CreateDemo(WebGpuContext& gpu, WGPUTextureFormat format, const std::filesystem::path& root,
+                const ApplicationOptions& options) {
+    if (options.chapter == Chapter::World) {
+        return Demo(std::in_place_type<WorldDemo>, gpu, format, root, options.worldPreset);
+    }
+    return Demo(std::in_place_type<TriangleRenderer>, gpu, format, root / "shaders" / "triangle.wgsl");
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 直接呈现没有 ImGui，从获得系统焦点的 GLFW 窗口读取驾驶按键。
+//————————————————————————————————————————————————————————————————————————————————
+CarInput ReadDirectDriveInput(GLFWwindow* window) {
+    if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) {
+        return {};
+    }
+    const bool forward = glfwGetKey(window, GLFW_KEY_W) || glfwGetKey(window, GLFW_KEY_UP);
+    const bool reverse = glfwGetKey(window, GLFW_KEY_S) || glfwGetKey(window, GLFW_KEY_DOWN);
+    const bool left = glfwGetKey(window, GLFW_KEY_A) || glfwGetKey(window, GLFW_KEY_LEFT);
+    const bool right = glfwGetKey(window, GLFW_KEY_D) || glfwGetKey(window, GLFW_KEY_RIGHT);
+    return {
+        static_cast<float>(forward - reverse),
+        static_cast<float>(left - right),
+        glfwGetKey(window, GLFW_KEY_R) || glfwGetKey(window, GLFW_KEY_HOME),
+    };
+}
 
 //————————————————————————————————————————————————————————————————————————————————
 // 将同一个颜色目标和尺寸交给已选择的章节渲染器。
@@ -151,10 +190,7 @@ int RunApplication(const ApplicationOptions& options) {
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
     const auto format = options.direct ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
-    const auto root = ExecutableDirectory();
-    Demo demo = isWorld
-        ? Demo(std::in_place_type<WorldDemo>, gpu, format, root, options.worldPreset)
-        : Demo(std::in_place_type<TriangleRenderer>, gpu, format, root / "shaders" / "triangle.wgsl");
+    Demo demo = CreateDemo(gpu, format, ExecutableDirectory(), options);
     log.Write("GPU", isWorld ? "Chapter 02 meshes, Lambert pipeline and depth state ready"
                              : "WGSL and triangle pipeline validated");
 
@@ -186,6 +222,12 @@ int RunApplication(const ApplicationOptions& options) {
 
         bool presented = false;
         if (framebuffer.width != 0 && framebuffer.height != 0) {
+            if (options.direct && isWorld) {
+                auto& scene = std::get<WorldDemo>(demo).scene;
+                if (scene.IsDriving()) {
+                    scene.UpdateDrive(ReadDirectDriveInput(window.Native()), static_cast<float>(frameIntervalMs / 1000.0));
+                }
+            }
             presented = RenderFrame(gpu, demo, editor ? &*editor : nullptr, log, framebuffer, frameIntervalMs);
         }
         if (!presented) {

@@ -14,7 +14,7 @@ namespace tinyworld {
 // 把 ImGui 的逻辑区域换算为纹理像素数，并构建图片控件。
 // 后端契约接受 WGPUTextureView，窗口本身并不拥有该 GPU 资源。
 //————————————————————————————————————————————————————————————————————————————————
-void SceneViewport::Build(WGPUDevice device, WorldEditor* world) {
+void SceneViewport::Build(WGPUDevice device, WorldEditor* world, float deltaSeconds) {
     mVisible = false;
     mFocused = false;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0f, 0.0f});
@@ -35,7 +35,7 @@ void SceneViewport::Build(WGPUDevice device, WorldEditor* world) {
                 ImGui::Image(ImTextureRef{id}, available);
                 mVisible = true;
                 if (world) {
-                    world->DrawViewport(mSize);
+                    world->DrawViewport(mSize, deltaSeconds);
                 }
             }
         }

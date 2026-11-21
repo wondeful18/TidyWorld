@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(multi_config)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>")
+endif()
 if(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
@@ -19,18 +23,37 @@ include(cmake/Dependencies.cmake)
 
 add_library(TinyWorldEngine STATIC
     Engine/Core/Log.cpp
+    Engine/Core/Log.h
     Engine/Platform/ExecutablePath.cpp
+    Engine/Platform/ExecutablePath.h
     Engine/Platform/Window.cpp
+    Engine/Platform/Window.h
     ${platform_surface}
+    Engine/Platform/Surface.h
+    Engine/Renderer/Color.h
     Engine/Renderer/RenderPass.cpp
+    Engine/Renderer/RenderPass.h
     Engine/Renderer/ShaderModule.cpp
+    Engine/Renderer/ShaderModule.h
     Engine/Renderer/TriangleRenderer.cpp
+    Engine/Renderer/TriangleRenderer.h
     Engine/Renderer/WebGpuContext.cpp
+    Engine/Renderer/WebGpuContext.h
+    Engine/Renderer/WgpuHandle.h
     Engine/Renderer/WorldRenderer.cpp
+    Engine/Renderer/WorldRenderer.h
     Engine/Scene/OrbitCamera.cpp
+    Engine/Scene/OrbitCamera.h
+    Engine/Scene/RoamingCar.cpp
+    Engine/Scene/RoamingCar.h
+    Engine/Scene/RoamingCarMesh.cpp
+    Engine/Scene/RoamingCarMesh.h
     Engine/Scene/SceneMesh.cpp
+    Engine/Scene/SceneMesh.h
     Engine/Scene/Transform.cpp
+    Engine/Scene/Transform.h
     Engine/Scene/WorldScene.cpp
+    Engine/Scene/WorldScene.h
 )
 target_include_directories(TinyWorldEngine PUBLIC "${PROJECT_SOURCE_DIR}")
 target_link_libraries(TinyWorldEngine PUBLIC glfw glm::glm-header-only wgpu_native::wgpu_native)
@@ -40,14 +63,34 @@ endif()
 
 add_executable(TinyWorld
     Editor/Application.cpp
+    Editor/Application.h
     Editor/EditorUi.cpp
+    Editor/EditorUi.h
     Editor/FrameCapture.cpp
+    Editor/FrameCapture.h
     Editor/SceneViewport.cpp
+    Editor/SceneViewport.h
     Editor/SmokeTest.cpp
+    Editor/SmokeTest.h
     Editor/WorldEditor.cpp
+    Editor/WorldEditor.h
     Editor/main.cpp
+    Assets/Shaders/triangle.wgsl
+    Assets/Shaders/world.wgsl
 )
 target_link_libraries(TinyWorld PRIVATE TinyWorldEngine tinyworld_imguizmo)
+
+if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+    set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT TinyWorld)
+    set_target_properties(TinyWorld PROPERTIES
+        VS_DEBUGGER_COMMAND_ARGUMENTS "--chapter 02"
+        VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:TinyWorld>"
+    )
+    foreach(target TinyWorldEngine TinyWorld)
+        get_target_property(sources ${target} SOURCES)
+        source_group(TREE "${PROJECT_SOURCE_DIR}" FILES ${sources})
+    endforeach()
+endif()
 
 add_executable(TinyWorldMeshPacker Tools/AssetTools/PackChapter02.cpp)
 target_include_directories(TinyWorldMeshPacker PRIVATE "${PROJECT_SOURCE_DIR}")

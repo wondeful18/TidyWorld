@@ -1,20 +1,22 @@
 #pragma once
 
 #include "Engine/Scene/OrbitCamera.h"
+#include "Engine/Scene/RoamingCar.h"
 #include "Engine/Scene/Transform.h"
 
 #include <array>
+#include <optional>
 
 namespace tinyworld {
 
-enum class WorldPreset { Default, Overlap, Evening };  // 第二章的演示场景
+enum class WorldPreset { Default, Overlap, Evening, Drive };  // 第二章的演示场景
 
 //————————————————————————————————————————————————————————————————————————————————
 // 场景中一个可选中的静态网格实例。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldObject {
     const char* name;      // 层级面板中的显示名称
-    const char* meshFile;  // 构建时部署的顶点数据文件名
+    const char* meshFile;  // 构建时部署的顶点数据文件名，空指针表示程序生成的小车
     Transform transform;  // 物体当前的变换
 };
 
@@ -37,11 +39,13 @@ struct DirectionalSun {
 // 第二章的完整场景数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
-    static constexpr std::size_t kObjectCount = 3; // 地面、树、房子各一个实例
+    static constexpr std::size_t kCarIndex = 3;  // 小车排在三件常驻物体后面
+    static constexpr std::size_t kObjectCount = kCarIndex + 1;  // 包含小车的最大物体数
     std::array<WorldObject, kObjectCount> objects{{
         {"Ground", "ground.twmesh", {}},
         {"Tree", "tree.twmesh", {{2.54f, 0.0f, 0.52f}}},
         {"Cottage", "house.twmesh", {{-1.78f, 0.0f, 0.16f}}},
+        {"Car", nullptr, {}},
     }};                        // 绘制顺序，重叠演示中的树先于房子提交
     OrbitCamera camera;        // 当前相机参数
     DirectionalSun sun;        // 当前太阳参数
@@ -50,6 +54,29 @@ struct WorldScene {
     // 重置场景，然后应用指定的演示布局。
     //————————————————————————————————————————————————————————————————————————————————
     void ApplyPreset(WorldPreset preset);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 进入或退出漫游，保留编辑器相机和三件常驻物体的状态。
+    //————————————————————————————————————————————————————————————————————————————————
+    void SetDriving(bool active);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 查询当前是否需要绘制并控制小车。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] bool IsDriving() const { return mCar.has_value(); }
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 在漫游期间更新车身变换和相机，时间以秒计。
+    //————————————————————————————————————————————————————————————————————————————————
+    void UpdateDrive(CarInput input, float deltaSeconds);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 返回当前模式使用的相机。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] const OrbitCamera& ActiveCamera() const { return mCar ? mCar->Camera() : camera; }
+
+private:
+    std::optional<RoamingCar> mCar;  // 仅在漫游模式下保存驾驶和跟随状态
 };
 
 }  // namespace tinyworld

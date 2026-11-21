@@ -35,7 +35,7 @@ PipelineHandle CreatePipeline(WebGpuContext& gpu, WGPUTextureFormat format,
                               const std::filesystem::path& path, bool srgb) {
     const auto shader = LoadWgslModule(gpu, path);
 
-    std::array<WGPUVertexAttribute, 2> attributes{WGPU_VERTEX_ATTRIBUTE_INIT, WGPU_VERTEX_ATTRIBUTE_INIT};
+    std::array<WGPUVertexAttribute, 2> attributes{{WGPU_VERTEX_ATTRIBUTE_INIT, WGPU_VERTEX_ATTRIBUTE_INIT}};
     attributes[0].format = WGPUVertexFormat_Float32x2;
     attributes[0].offset = offsetof(Vertex, position);
     attributes[0].shaderLocation = 0;

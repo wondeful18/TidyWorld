@@ -31,12 +31,14 @@ int main(int argc, char** argv) {
                 options.worldPreset = tinyworld::WorldPreset::Overlap;
             } else if (value == "evening") {
                 options.worldPreset = tinyworld::WorldPreset::Evening;
+            } else if (value == "drive") {
+                options.worldPreset = tinyworld::WorldPreset::Drive;
             } else {
-                std::cerr << "Choose preset overlap or evening.\n";
+                std::cerr << "Choose preset overlap, evening or drive.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01|02] [--preset overlap|evening] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01|02] [--preset overlap|evening|drive] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n";
             return EXIT_SUCCESS;
         } else {
