@@ -4,19 +4,41 @@
 #include "Engine/Renderer/RenderPass.h"
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
+#include "Engine/Scene/RobotMesh.h"
 #include "Engine/Scene/RoamingCarMesh.h"
 #include "Engine/Scene/SceneMesh.h"
+#include "Engine/Scene/WalkerMesh.h"
+#include "Engine/Terrain/TerrainMesh.h"
 
 #include <glm/matrix.hpp>
 #include <glm/vec4.hpp>
 
 #include <cstddef>
 #include <stdexcept>
+#include <vector>
 
 namespace tinyworld {
 namespace {
 
 constexpr auto kDepthFormat = WGPUTextureFormat_Depth24Plus;
+
+//————————————————————————————————————————————————————————————————————————————————
+// 区分车漆与玻璃，其他网格顶点的环境反射权重为零。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<WorldVertex> WithReflectivity(const std::vector<SceneVertex>& geometry,
+                                         const CarSurfaceRanges& surfaces = {}) {
+    std::vector<WorldVertex> vertices;
+    vertices.reserve(geometry.size());
+    for (std::size_t i = 0; i < geometry.size(); ++i) {
+        float reflection = 0.0f;
+        if (i < surfaces.reflectiveEnd) {
+            const bool glass = i >= surfaces.glassBegin && i < surfaces.glassEnd;
+            reflection = glass ? 1.0f : 0.47f;
+        }
+        vertices.push_back({geometry[i], reflection});
+    }
+    return vertices;
+}
 
 //————————————————————————————————————————————————————————————————————————————————
 // 按 WGSL 对齐顺序打包每个物体的矩阵与光照参数。
@@ -27,35 +49,81 @@ struct DrawUniform {
     glm::mat4 normalToWorld;   // 模型矩阵的逆转置，处理非均匀缩放
     glm::vec4 towardSun;       // 从表面指向太阳的世界方向
     glm::vec4 sunRadiance;     // 线性灯光颜色乘以强度
+    glm::mat4 lightViewProjection;  // 从世界空间到太阳的裁剪空间
+    glm::vec4 shadowControls;      // 依次为阴影开关、PCF 开关、基础深度偏移和保留槽
+    glm::vec4 cameraAndReflection; // xyz 为世界相机位置，w 为车身反射开关
+    glm::vec4 material;            // 材质类别和对应的参数
 };
 
-static_assert(sizeof(DrawUniform) == 224);
+static_assert(offsetof(DrawUniform, lightViewProjection) == 224);
+static_assert(sizeof(DrawUniform) == 336);
 
 //————————————————————————————————————————————————————————————————————————————————
-// 声明位置、法线、底色三组顶点属性，并为近处三角形开启深度写入。
+// 显式定义物体布局，使太阳深度和颜色管线可共用每个物体的绑定。
 //————————————————————————————————————————————————————————————————————————————————
-PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, const std::filesystem::path& path) {
-    const auto shader = LoadWgslModule(gpu, path);
-    std::array<WGPUVertexAttribute, 3> attributes{};
-    constexpr std::array offsets{offsetof(SceneVertex, position), offsetof(SceneVertex, normal),
-                                 offsetof(SceneVertex, color)};
+BindGroupLayoutHandle BuildObjectLayout(WebGpuContext& gpu) {
+    WGPUBindGroupLayoutEntry uniform = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    uniform.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+    uniform.buffer.type = WGPUBufferBindingType_Uniform;
+    uniform.buffer.minBindingSize = sizeof(DrawUniform);
+
+    WGPUBindGroupLayoutDescriptor description = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    description.entryCount = 1;
+    description.entries = &uniform;
+    wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
+    BindGroupLayoutHandle layout(wgpuDeviceCreateBindGroupLayout(gpu.Device(), &description));
+    gpu.CheckValidation("world object bind group layout");
+    if (!layout) {
+        throw std::runtime_error("Cannot create world object layout");
+    }
+    return layout;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 创建相机颜色管线。第三章额外绑定太阳深度图，第二章沿用 Lambert 入口。
+//————————————————————————————————————————————————————————————————————————————————
+PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUShaderModule shader,
+                             WGPUBindGroupLayout objects, WGPUBindGroupLayout shadows,
+                             WGPUBindGroupLayout environment, WGPUBindGroupLayout materials) {
+    const std::array layouts{objects, shadows, environment, materials};
+    WGPUPipelineLayoutDescriptor pipelineLayout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayout.bindGroupLayoutCount = materials ? 4 : (environment ? 3 : (shadows ? 2 : 1));
+    pipelineLayout.bindGroupLayouts = layouts.data();
+
+    std::array<WGPUVertexAttribute, 4> attributes{};
+    constexpr auto geometry = offsetof(WorldVertex, geometry);
+    constexpr std::array offsets{geometry + offsetof(SceneVertex, position),
+                                 geometry + offsetof(SceneVertex, normal),
+                                 geometry + offsetof(SceneVertex, color),
+                                 offsetof(WorldVertex, reflectivity)};
     for (std::uint32_t i = 0; i < attributes.size(); ++i) {
         attributes[i] = WGPU_VERTEX_ATTRIBUTE_INIT;
-        attributes[i].format = WGPUVertexFormat_Float32x3;
+        attributes[i].format = i == 3 ? WGPUVertexFormat_Float32 : WGPUVertexFormat_Float32x3;
         attributes[i].offset = offsets[i];
         attributes[i].shaderLocation = i;
     }
     WGPUVertexBufferLayout layout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
-    layout.arrayStride = sizeof(SceneVertex);
+    layout.arrayStride = sizeof(WorldVertex);
     layout.stepMode = WGPUVertexStepMode_Vertex;
-    layout.attributeCount = attributes.size();
+    layout.attributeCount = environment ? attributes.size() : 3;
     layout.attributes = attributes.data();
 
     WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
     color.format = format;
     WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-    fragment.module = shader.get();
-    fragment.entryPoint = {IsSrgbFormat(format) ? "fsLinear" : "fsDisplay", WGPU_STRLEN};
+    fragment.module = shader;
+    const bool srgb = IsSrgbFormat(format);
+    const char* entry = srgb ? "fsLinear" : "fsDisplay";
+    if (shadows) {
+        entry = srgb ? "fsShadowedLinear" : "fsShadowedDisplay";
+    }
+    if (environment) {
+        entry = srgb ? "fsEnvironmentLinear" : "fsEnvironmentDisplay";
+    }
+    if (materials) {
+        entry = srgb ? "fsMaterialsLinear" : "fsMaterialsDisplay";
+    }
+    fragment.entryPoint = {entry, WGPU_STRLEN};
     fragment.targetCount = 1;
     fragment.targets = &color;
 
@@ -65,9 +133,10 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, const
     depth.depthWriteEnabled = WGPUOptionalBool_True;
 
     WGPURenderPipelineDescriptor description = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    description.label = {"Chapter 02 Lambert and depth", WGPU_STRLEN};
-    description.vertex.module = shader.get();
-    description.vertex.entryPoint = {"vsWorld", WGPU_STRLEN};
+    description.label = {"World color pipeline", WGPU_STRLEN};
+    description.vertex.module = shader;
+    const char* vertexEntry = shadows ? "vsShadowedWorld" : "vsWorld";
+    description.vertex.entryPoint = {environment ? "vsEnvironmentWorld" : vertexEntry, WGPU_STRLEN};
     description.vertex.bufferCount = 1;
     description.vertex.buffers = &layout;
     description.primitive.cullMode = WGPUCullMode_Back;
@@ -75,10 +144,12 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, const
     description.fragment = &fragment;
 
     wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
-    PipelineHandle pipeline(wgpuDeviceCreateRenderPipeline(gpu.Device(), &description));
-    gpu.CheckValidation("chapter 02 Lambert pipeline");
-    if (!pipeline) {
-        throw std::runtime_error("Cannot create chapter 02 render pipeline");
+    PipelineLayoutHandle bindLayouts(wgpuDeviceCreatePipelineLayout(gpu.Device(), &pipelineLayout));
+    description.layout = bindLayouts.get();
+    PipelineHandle pipeline(bindLayouts ? wgpuDeviceCreateRenderPipeline(gpu.Device(), &description) : nullptr);
+    gpu.CheckValidation("world color pipeline");
+    if (!bindLayouts || !pipeline) {
+        throw std::runtime_error("Cannot create world color pipeline");
     }
     return pipeline;
 }
@@ -93,7 +164,7 @@ BufferHandle MakeBuffer(WGPUDevice device, WGPUBufferUsage usage, std::uint64_t 
     description.size = size;
     BufferHandle buffer(wgpuDeviceCreateBuffer(device, &description));
     if (!buffer) {
-        throw std::runtime_error("Cannot create chapter 02 GPU buffer");
+        throw std::runtime_error("Cannot create world GPU buffer");
     }
     return buffer;
 }
@@ -105,7 +176,28 @@ BufferHandle MakeBuffer(WGPUDevice device, WGPUBufferUsage usage, std::uint64_t 
 //————————————————————————————————————————————————————————————————————————————————
 WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
                              const WorldScene& scene, const std::filesystem::path& root)
-    : mGpu(gpu), mPipeline(BuildPipeline(gpu, format, root / "shaders" / "world.wgsl")) {
+    : mGpu(gpu) {
+    const auto shader = LoadWgslModule(gpu, root / "shaders" / "world.wgsl");
+    mObjectLayout = BuildObjectLayout(gpu);
+    const auto layout = mObjectLayout.get();
+    if (scene.shadows || scene.environment) {
+        mShadowMap.emplace(gpu, shader.get(), layout);
+    }
+    if (scene.environment) {
+        mSky.emplace(gpu, format, kDepthFormat, root);
+    }
+    if (scene.materials) {
+        mMaterials.emplace(gpu, root);
+        const auto sphere = WithReflectivity(MakeMaterialSphere());
+        for (auto& draw : mMaterialSpheres) {
+            draw = UploadMesh(sphere, layout, "Material comparison sphere");
+        }
+    }
+    mPipeline = BuildPipeline(gpu, format, shader.get(), layout,
+                              mShadowMap ? mShadowMap->SamplingLayout() : nullptr,
+                              mSky ? mSky->Environment().Layout() : nullptr,
+                              mMaterials ? mMaterials->Layout() : nullptr);
+
     mClearColor = {0.89, 0.925, 0.941, 1.0};
     if (IsSrgbFormat(format)) {
         mClearColor.r = DisplayToLinear(mClearColor.r);
@@ -113,34 +205,104 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mClearColor.b = DisplayToLinear(mClearColor.b);
     }
 
-    BindGroupLayoutHandle layout(wgpuRenderPipelineGetBindGroupLayout(mPipeline.get(), 0));
-    if (!layout) {
-        throw std::runtime_error("Cannot get chapter 02 uniform layout");
+    const std::size_t meshCount = scene.spawn ? mDraws.size() : WorldScene::kObjectCount;
+    const auto* terrain = scene.Terrain();
+    for (std::size_t i = terrain ? 1 : 0; i < meshCount; ++i) {
+        CarSurfaceRanges carSurfaces;
+        const bool walker = i == WorldScene::kObjectCount;
+        const auto geometry = walker ? (terrain ? MakeRobotMesh() : MakeWalkerMesh())
+            : i == WorldScene::kCarIndex ? MakeRoamingCarMesh(&carSurfaces)
+            : LoadSceneMesh(root / scene.objects[i].asset);
+        mDraws[i] = UploadMesh(WithReflectivity(geometry, carSurfaces), layout,
+                               walker ? "Walker" : scene.objects[i].name);
     }
-    for (size_t i = 0; i < mDraws.size(); ++i) {
-        const auto& object = scene.objects[i];
-        auto& draw = mDraws[i];
-        const auto vertices = object.meshFile
-            ? LoadSceneMesh(root / "models" / "ch02" / object.meshFile)
-            : MakeRoamingCarMesh();
-        draw.count = static_cast<std::uint32_t>(vertices.size());
-        const auto bytes = vertices.size() * sizeof(SceneVertex);
-        draw.vertices = MakeBuffer(gpu.Device(), WGPUBufferUsage_Vertex, bytes, object.name);
-        wgpuQueueWriteBuffer(gpu.Queue(), draw.vertices.get(), 0, vertices.data(), bytes);
-        draw.uniform = MakeBuffer(gpu.Device(), WGPUBufferUsage_Uniform, sizeof(DrawUniform), "World object uniform");
+    if (terrain) {
+        for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
+            for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x) {
+                const auto mesh = MakeTerrainChunk(*terrain, {x, z}, !scene.road);
+                const auto index = mTerrainDraws.size();
+                mTerrainDraws.push_back(UploadMesh(WithReflectivity(mesh), layout, "Terrain chunk"));
+                if (scene.canPreviewLod) {
+                    const auto coarse = MakeTerrainChunk(*terrain, {x, z}, true, true);
+                    mCoarseTerrainDraws.push_back(UploadMesh(WithReflectivity(coarse), layout, "Terrain LOD 1"));
+                }
+                mChunkRevisions[index] = terrain->ChunkRevision(index);
+            }
+        }
+        mChunkBorders.emplace(UploadMesh(WithReflectivity(MakeChunkBorders(*terrain)), layout, "Chunk borders"));
+        mBorderRevision = terrain->Revision();
+    }
+}
 
-        WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
-        entry.buffer = draw.uniform.get();
-        entry.size = sizeof(DrawUniform);
-        WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-        binding.layout = layout.get();
-        binding.entryCount = 1;
-        binding.entries = &entry;
-        draw.binding.reset(wgpuDeviceCreateBindGroup(gpu.Device(), &binding));
-        if (!draw.binding) {
-            throw std::runtime_error("Cannot bind chapter 02 object uniform");
+//————————————————————————————————————————————————————————————————————————————————
+// 共边附近的笔刷会给两个块相同的新修订号，两个通道会一起看到新网格。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::SyncTerrain(const HeightField& field, bool showBorders, bool paintTrail) {
+    std::size_t index = 0;
+    for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
+        for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x, ++index) {
+            const auto revision = field.ChunkRevision(index);
+            if (mChunkRevisions[index] == revision) {
+                continue;
+            }
+            const auto vertices = WithReflectivity(MakeTerrainChunk(field, {x, z}, paintTrail));
+            wgpuQueueWriteBuffer(mGpu.Queue(), mTerrainDraws[index].vertices.get(), 0,
+                                 vertices.data(), vertices.size() * sizeof(WorldVertex));
+            mChunkRevisions[index] = revision;
         }
     }
+    if (showBorders && mBorderRevision != field.Revision()) {
+        const auto vertices = WithReflectivity(MakeChunkBorders(field));
+        wgpuQueueWriteBuffer(mGpu.Queue(), mChunkBorders->vertices.get(), 0,
+                             vertices.data(), vertices.size() * sizeof(WorldVertex));
+        mBorderRevision = field.Revision();
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 避让边距不改变路面，拖动控制点或雕刻高度才需要裁剪并上传。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::SyncRoad(const HeightField& field, const RoadSpline& road) {
+    if (mLastRoad && mLastRoad->points == road.points && mLastRoad->width == road.width &&
+        mLastRoad->junction == road.junction && mLastRoad->junctionPoint == road.junctionPoint &&
+        mLastRoad->branchLength == road.branchLength &&
+        mRoadTerrainRevision == field.Revision()) {
+        return;
+    }
+    const auto mesh = MakeRoadMesh(field, road);
+    if (mesh.empty()) {
+        mRoadMesh.reset();
+    } else {
+        mRoadMesh.emplace(UploadMesh(WithReflectivity(mesh), mObjectLayout.get(), "Spline road"));
+    }
+    mLastRoad = road;
+    mRoadTerrainRevision = field.Revision();
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 同一上传路径接收房屋、小车、机器人和地形的顶点数据。
+//————————————————————————————————————————————————————————————————————————————————
+WorldRenderer::Drawable WorldRenderer::UploadMesh(std::span<const WorldVertex> vertices,
+                                                   WGPUBindGroupLayout layout, const char* name) {
+    Drawable draw;
+    draw.count = static_cast<std::uint32_t>(vertices.size());
+    const auto bytes = vertices.size_bytes();
+    draw.vertices = MakeBuffer(mGpu.Device(), WGPUBufferUsage_Vertex, bytes, name);
+    wgpuQueueWriteBuffer(mGpu.Queue(), draw.vertices.get(), 0, vertices.data(), bytes);
+    draw.uniform = MakeBuffer(mGpu.Device(), WGPUBufferUsage_Uniform, sizeof(DrawUniform), "World object uniform");
+
+    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+    entry.buffer = draw.uniform.get();
+    entry.size = sizeof(DrawUniform);
+    WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    binding.layout = layout;
+    binding.entryCount = 1;
+    binding.entries = &entry;
+    draw.binding.reset(wgpuDeviceCreateBindGroup(mGpu.Device(), &binding));
+    if (!draw.binding) {
+        throw std::runtime_error("Cannot bind world object uniform");
+    }
+    return draw;
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -169,28 +331,151 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 从当前场景取相机、变换和太阳参数，使用一个深度通道绘制整个世界。
+// 同一帧内物体变换只上传一次。先写入太阳深度，再切换到相机读取阴影。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size,
                            const WorldScene& scene) {
     ResizeDepth(size);
+    if (mMaterials && scene.paint) {
+        mMaterials->SyncPaint(mGpu.Queue(), *scene.paint);
+    }
+    if (const auto* terrain = scene.Terrain()) {
+        SyncTerrain(*terrain, scene.showChunkBorders, !scene.road);
+        if (scene.road) {
+            SyncRoad(*terrain, *scene.road);
+        }
+    }
     const auto& camera = scene.ActiveCamera();
-    const glm::mat4 vp = camera.Projection(static_cast<float>(size.width) / size.height) * camera.View();
-    const glm::vec4 direction(scene.sun.TowardLight(), 0.0f);
+    if (!mCoarseTerrainDraws.empty()) {
+        std::size_t i = 0;
+        const auto eye = camera.Position();
+        for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
+            for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x, ++i) {
+                mCoarseChoice[i] = scene.previewLod && IsCoarseTerrainChunk({x, z}, eye);
+            }
+        }
+    }
+    const auto projection = camera.Projection(static_cast<float>(size.width) / size.height);
+    const auto view = camera.View();
+    const glm::mat4 vp = projection * view;
+    const bool reflectCar = scene.environment && scene.environment->carReflection;
+    const glm::vec4 cameraAndReflection(camera.Position(), reflectCar ? 1.0f : 0.0f);
+    const auto towardSun = scene.sun.TowardLight();
+    const glm::vec4 direction(towardSun, 0.0f);
     const glm::vec4 sun(scene.sun.color * scene.sun.intensity, 0.0f);
-    auto pass = BeginColorPass(encoder, target, mClearColor, "Chapter 02 world pass", mDepthView.get());
-    wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
-    const std::size_t visibleCount = scene.IsDriving() ? mDraws.size() : WorldScene::kCarIndex;
-    for (std::size_t i = 0; i < visibleCount; ++i) {
-        const auto& draw = mDraws[i];
-        const glm::mat4 model = scene.objects[i].transform.Matrix();
-        const DrawUniform uniforms{vp, model, glm::transpose(glm::inverse(model)), direction, sun};
+    glm::mat4 lightViewProjection{1.0f};
+    glm::vec4 shadowControls{0.0f};
+    const bool renderShadow = mShadowMap && scene.shadows && scene.shadows->enabled;
+    if (renderShadow) {
+        lightViewProjection = SunShadowMap::ViewProjection(towardSun, scene.sun.azimuth, scene.terrain ? 3.0f : 1.0f);
+        shadowControls = {1.0f, scene.shadows->pcf ? 1.0f : 0.0f, scene.shadows->depthBias, 0.0f};
+    }
+
+    std::size_t visibleCount = (scene.IsDriving() || scene.spawn) ? WorldScene::kObjectCount
+                                                                : WorldScene::kCarIndex;
+    if (scene.spawn && !scene.IsDriving()) {
+        // 编辑时显示出生预览，步行时使用同一网格显示当前角色。
+        visibleCount = mDraws.size();
+    }
+    const bool showSpheres = scene.materials && scene.materials->spheres;
+    if (showSpheres) {
+        visibleCount = 0;
+    }
+    const auto uploadUniform = [&](const Drawable& draw, const glm::mat4& model, const glm::vec4& shadows,
+                                   const glm::vec4& material = glm::vec4{0.0f}) {
+        const DrawUniform uniforms{vp, model, glm::transpose(glm::inverse(model)), direction, sun,
+                                   lightViewProjection, shadows, cameraAndReflection, material};
         wgpuQueueWriteBuffer(mGpu.Queue(), draw.uniform.get(), 0, &uniforms, sizeof(uniforms));
-        wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, draw.binding.get(), 0, nullptr);
-        wgpuRenderPassEncoderSetVertexBuffer(pass.get(), 0, draw.vertices.get(), 0, draw.count * sizeof(SceneVertex));
-        wgpuRenderPassEncoderDraw(pass.get(), draw.count, 1, 0, 0);
+    };
+    for (std::size_t i = scene.terrain ? 1 : 0; i < visibleCount; ++i) {
+        const glm::mat4 model = i == WorldScene::kObjectCount ? scene.WalkerPose().Matrix()
+                                                           : scene.objects[i].transform.Matrix();
+        uploadUniform(mDraws[i], model, shadowControls);
+    }
+    glm::vec4 terrainMaterial{0.0f};
+    if (scene.materials && scene.materials->view != MaterialView::VertexColor) {
+        terrainMaterial = {1.0f, static_cast<float>(scene.materials->view), scene.road ? 0.0f : 1.0f, 0.0f};
+    }
+    for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        uploadUniform(mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i], glm::mat4{1.0f},
+                      shadowControls, terrainMaterial);
+    }
+    if (showSpheres) {
+        constexpr float radius = 0.83f;
+        for (std::size_t i = 0; i < mMaterialSpheres.size(); ++i) {
+            const float x = -3.24f + 2.16f * static_cast<float>(i);
+            constexpr float z = 8.0f;
+            const float y = scene.terrain->HeightAt({x, z}) + radius;
+            glm::mat4 model{radius};
+            model[3] = {x, y, z, 1.0f};
+            const glm::vec4 settings{2.0f, i < 2 ? 0.0f : 1.0f, i % 2 == 0 ? 0.24f : 0.62f, 0.0f};
+            uploadUniform(mMaterialSpheres[i], model, shadowControls, settings);
+        }
+    }
+    const bool showBorders = mChunkBorders.has_value() && scene.showChunkBorders && !showSpheres;
+    const bool showRoad = mRoadMesh.has_value() && !showSpheres;
+    if (showRoad) {
+        uploadUniform(*mRoadMesh, glm::mat4{1.0f}, shadowControls,
+                      {3.0f, static_cast<float>(scene.road->surface), 0.0f, 0.0f});
+    }
+    if (showBorders) {
+        uploadUniform(*mChunkBorders, glm::mat4{1.0f}, glm::vec4{0.0f});
+    }
+    if (renderShadow) {
+        auto depthPass = mShadowMap->Begin(encoder);
+        DrawObjects(depthPass.get(), visibleCount, showSpheres);
+        wgpuRenderPassEncoderEnd(depthPass.get());
+    }
+
+    auto pass = BeginColorPass(encoder, target, mClearColor, "World color pass", mDepthView.get());
+    wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
+    if (mShadowMap) {
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
+    }
+    if (mSky) {
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 2, mSky->Environment().Binding(), 0, nullptr);
+    }
+    if (mMaterials) {
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 3, mMaterials->Binding(), 0, nullptr);
+    }
+    DrawObjects(pass.get(), visibleCount, showSpheres);
+    if (showRoad) {
+        // 路面接收地形和地标的阴影；薄路面本身只在颜色通道绘制。
+        DrawMesh(pass.get(), *mRoadMesh);
+    }
+    if (showBorders) {
+        DrawMesh(pass.get(), *mChunkBorders);
+    }
+    if (mSky && scene.environment) {
+        mSky->Draw(pass.get(), projection, view, scene.environment->sky);
     }
     wgpuRenderPassEncoderEnd(pass.get());
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 两个通道读取同一份顶点与物体变换，保证角色和车辆也能投影。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount, bool showSpheres) const {
+    for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        DrawMesh(pass, mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i]);
+    }
+    for (std::size_t i = mTerrainDraws.empty() ? 0 : 1; i < visibleCount; ++i) {
+        DrawMesh(pass, mDraws[i]);
+    }
+    if (showSpheres) {
+        for (const auto& sphere : mMaterialSpheres) {
+            DrawMesh(pass, sphere);
+        }
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 提交与一个对象或地形块对应的三角形列表。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh) {
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, mesh.binding.get(), 0, nullptr);
+    wgpuRenderPassEncoderSetVertexBuffer(pass, 0, mesh.vertices.get(), 0, mesh.count * sizeof(WorldVertex));
+    wgpuRenderPassEncoderDraw(pass, mesh.count, 1, 0, 0);
 }
 
 }  // namespace tinyworld

@@ -19,10 +19,12 @@ struct CarInput {
 //————————————————————————————————————————————————————————————————————————————————
 class RoamingCar {
 public:
+    static constexpr Transform kDefaultStart{{0.9f, 0.0f, 2.8f}, {0.0f, 180.0f, 0.0f}};  // 早期章节的小车起点
     //————————————————————————————————————————————————————————————————————————————————
     // 把车身放到出发点并对准车后的镜头。此后由 Update 接管该变换。
+    // elevation 为跟随相机的仰角，单位为度。
     //————————————————————————————————————————————————————————————————————————————————
-    explicit RoamingCar(Transform& body);
+    explicit RoamingCar(Transform& body, float elevation = 24.0f, const Transform& start = kDefaultStart);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 根据按键和本帧经过的秒数更新车身，然后让相机跟上。
@@ -41,6 +43,7 @@ private:
     void Follow(const Transform& body);
 
     OrbitCamera mCamera;  // 漫游模式独立的相机，退出时保留原环绕视角
+    Transform mStart;     // 本次驾驶的初始车身变换，供重置使用
     float mSpeed{};      // 沿车头方向的有符号速度，单位为米每秒
 };
 

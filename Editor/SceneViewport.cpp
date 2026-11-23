@@ -23,6 +23,9 @@ void SceneViewport::Build(WGPUDevice device, WorldEditor* world, float deltaSeco
     try {
         if (opened) {
             mFocused = ImGui::IsWindowFocused();
+            if (world) {
+                world->DrawToolbar();
+            }
             const auto available = ImGui::GetContentRegionAvail();
             const auto scale = ImGui::GetIO().DisplayFramebufferScale;
             if (available.x > 0.0f && available.y > 0.0f && scale.x > 0.0f && scale.y > 0.0f) {

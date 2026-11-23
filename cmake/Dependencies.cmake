@@ -2,6 +2,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/WgpuNative.cmake")
 find_package(glfw3 3.5.1 EXACT CONFIG REQUIRED)
 find_package(glm 1.0.3 EXACT CONFIG REQUIRED)
 find_path(CGLTF_INCLUDE_DIR cgltf.h REQUIRED)
+find_package(Stb REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 FetchContent_Declare(dear_imgui
     URL "https://codeload.github.com/ocornut/imgui/zip/b916186e66aa3c02b72c6ca17455516512ed8049"

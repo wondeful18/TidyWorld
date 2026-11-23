@@ -1,0 +1,109 @@
+#include "Runtime/WalkController.h"
+
+#include "Engine/Terrain/HeightField.h"
+
+#include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+namespace tinyworld {
+namespace {
+
+constexpr double kStep = 1.0 / 120.0;
+constexpr double kTimeTolerance = 1.0e-9;
+constexpr float kWalkSpeed = 1.8f;
+constexpr float kTurnSpeed = 125.0f;
+
+//————————————————————————————————————————————————————————————————————————————————
+// 将绕 Y 轴的角度转换成水平前向，角度使用度。
+//————————————————————————————————————————————————————————————————————————————————
+glm::vec3 Forward(float yaw) {
+    return {std::sin(glm::radians(yaw)), 0.0f, std::cos(glm::radians(yaw))};
+}
+
+}  // namespace
+
+//————————————————————————————————————————————————————————————————————————————————
+// T × R × S 作用于脚底的点，朝向向量只应用 R × S。
+//————————————————————————————————————————————————————————————————————————————————
+Transform WalkSpawn::WorldPose(const Transform& ground, const HeightField* terrain) const {
+    if (terrain) {
+        return {{groundXZ.x, terrain->HeightAt(groundXZ), groundXZ.y}, {0.0f, yaw, 0.0f}};
+    }
+    const auto model = ground.Matrix();
+    const auto feet = glm::vec3(model * glm::vec4(groundXZ.x, 0.0f, groundXZ.y, 1.0f));
+    const auto forward = glm::vec3(model * glm::vec4(Forward(yaw), 0.0f));
+    // 草台朝向可编辑，角色保持直立。水平投影消失时沿用局部偏航角。
+    const float heading = std::hypot(forward.x, forward.z) > 0.0001f
+        ? glm::degrees(std::atan2(forward.x, forward.z))
+        : yaw;
+    return {feet, {0.0f, heading, 0.0f}};
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 从出生点生成脚底和跟随相机，固定距离保留前方可检查的地面。
+//————————————————————————————————————————————————————————————————————————————————
+WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain)
+    : mFeet(spawn) {
+    mCamera.distance = 4.3f;
+    mCamera.elevation = 9.0f;
+    Follow(ground, terrain);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 每个时间步先转向、再按世界米数移动，并把局部坐标夹在草台边界内。
+//————————————————————————————————————————————————————————————————————————————————
+void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, WalkInput input,
+                            double deltaSeconds, const HeightField* terrain) {
+    if (input.reset) {
+        *this = WalkController(spawn, ground, terrain);
+        return;
+    }
+
+    // 窗口恢复后最多补算 0.1 秒，避免把长时间暂停变成一次大跳跃。
+    mRemaining += std::clamp(deltaSeconds, 0.0, 0.1);
+    const auto groundBasis = terrain ? glm::mat3{1.0f} : glm::mat3(ground.Matrix());
+    const float limitX = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitX;
+    const float limitZ = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitZ;
+    const float stepSeconds = static_cast<float>(kStep);
+    const float turnDegrees = input.turn * kTurnSpeed * stepSeconds;
+    // 允许纳秒量级的舍入误差，避免同一段时间因帧分组少推进一步。
+    while (mRemaining + kTimeTolerance >= kStep) {
+        mFeet.yaw = std::remainder(mFeet.yaw + turnDegrees, 360.0f);
+        const glm::vec3 forward = Forward(mFeet.yaw);
+        const float metersPerUnit = glm::length(groundBasis * forward);
+        const float travel = input.forward * kWalkSpeed * stepSeconds / metersPerUnit;
+        mFeet.groundXZ += glm::vec2(forward.x, forward.z) * travel;
+        mFeet.groundXZ.x = std::clamp(mFeet.groundXZ.x, -limitX, limitX);
+        mFeet.groundXZ.y = std::clamp(mFeet.groundXZ.y, -limitZ, limitZ);
+        mRemaining = std::max(0.0, mRemaining - kStep);
+    }
+    Follow(ground, terrain);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 看向角色胸口前方。OrbitCamera 的 0 度在观察点的 +Z 侧，加 180 度得到角色身后。
+//————————————————————————————————————————————————————————————————————————————————
+void WalkController::Follow(const Transform& ground, const HeightField* terrain) {
+    mPose = mFeet.WorldPose(ground, terrain);
+    const float yaw = mPose.rotationDegrees.y;
+    mCamera.target = mPose.position + glm::vec3{0.0f, 1.05f, 0.0f} + Forward(yaw) * 0.45f;
+    mCamera.azimuth = yaw + 180.0f;
+    if (terrain) {
+        mCamera.distance = 4.3f;
+        mCamera.elevation = 13.0f;
+        const auto eye = mCamera.Position();
+        const float minimumY = terrain->HeightAt({eye.x, eye.z}) + 0.35f;
+        if (eye.y < minimumY) {
+            // 只抬高镜头，保留水平位置，避免从坡下回头时仰角把相机拉进坡面。
+            const float horizontal = glm::length(glm::vec2(eye.x - mCamera.target.x, eye.z - mCamera.target.z));
+            const float vertical = minimumY - mCamera.target.y;
+            mCamera.elevation = glm::degrees(std::atan2(vertical, horizontal));
+            mCamera.distance = std::hypot(horizontal, vertical);
+        }
+    }
+}
+
+}  // namespace tinyworld

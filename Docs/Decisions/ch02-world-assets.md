@@ -10,4 +10,4 @@
 
 ImGuizmo 直接与第一章锁定的 ImGui Docking 目标共用一个 context。场景使用 `[0, 1]` 裁剪深度，手柄使用 `[-1, 1]` 投影约定。相同相机、视场角与纵横比使两条路径的二维投影一致。
 
-GLB 转换作为构建产物生成，运行时通过 `SceneVertex` 布局读取 `.twmesh`。包的头部为四字节 `TWM2`、小端 `uint32` 顶点数，之后为紧密排列的九个 `float32`，依次为 XYZ、法线 XYZ 和线性 RGB。通用 glTF 数据导入在第 11 章扩展。 [章节教程](../../Chapters/ch02/README.md)
+GLB 转换作为构建产物生成，运行时通过 `SceneVertex` 布局读取 `.twmesh`。包的头部为四字节 `TWM2`、小端 `uint32` 顶点数，之后为紧密排列的九个 `float32`，依次为 XYZ、法线 XYZ 和线性 RGB。通用 glTF 静态资产导入在第 12 章扩展。 [章节教程](../../Chapters/ch02/README.md)

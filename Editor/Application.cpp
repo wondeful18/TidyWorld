@@ -10,6 +10,7 @@
 #include "Engine/Renderer/TriangleRenderer.h"
 #include "Engine/Renderer/WebGpuContext.h"
 #include "Engine/Renderer/WorldRenderer.h"
+#include "Engine/Scene/SceneFile.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -23,7 +24,65 @@ namespace tinyworld {
 namespace {
 
 //————————————————————————————————————————————————————————————————————————————————
-// 将第二章的 CPU 场景、GPU 资源和面板绑定到同一个局部生命周期。
+// 复用小屋与小车预设，并在创建 GPU 资源前确定本章是否提供阴影。
+//————————————————————————————————————————————————————————————————————————————————
+WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesystem::path& root) {
+    WorldScene scene;
+    const bool terrainChapter = options.chapter >= Chapter::Terrain;
+    const bool walkChapter = options.chapter == Chapter::Walk || terrainChapter;
+    const bool hasSky = options.chapter == Chapter::Sky || walkChapter;
+    if (options.chapter == Chapter::SunShadows || hasSky) {
+        scene.shadows = options.shadowOverrides.value_or(ShadowSettings{});
+        if (terrainChapter && !options.shadowOverrides) {
+            // 对扩大的太阳投影实测偏移，在平缓地表抑制自阴影条纹。
+            scene.shadows->depthBias = 0.0012f;
+        }
+    }
+    if (hasSky) {
+        scene.environment = options.environmentOverrides.value_or(EnvironmentSettings{});
+    }
+    if (walkChapter) {
+        scene.spawn.emplace();
+    }
+    if (terrainChapter) {
+        scene.terrain.emplace();
+        scene.canPreviewLod = options.chapter == Chapter::Terrain;
+        scene.previewLod = options.lodPreview;
+        scene.canSculpt = options.chapter >= Chapter::Sculpt;
+        scene.showChunkBorders = options.chunkBorders;
+    }
+    auto scenePath = options.scenePath;
+    if (options.chapter >= Chapter::Materials) {
+        scene.materials.emplace();
+        scene.paint.emplace();
+        if (scenePath.empty() && options.worldPreset != WorldPreset::Overlap && options.worldPreset != WorldPreset::Evening) {
+            scenePath = root / "scenes" / "ch07" / "valley.json";
+        }
+    }
+    if (options.chapter >= Chapter::Road) {
+        scene.road.emplace();
+    }
+    if (scenePath.empty()) {
+        scene.ApplyPreset(options.worldPreset);
+    } else {
+        LoadScene(scenePath, scene);
+        if (options.shadowOverrides) {
+            scene.shadows = options.shadowOverrides;
+        }
+        if (options.environmentOverrides) {
+            scene.environment = options.environmentOverrides;
+        }
+        scene.SetDriving(options.worldPreset == WorldPreset::Drive);
+        scene.SetWalking(options.worldPreset == WorldPreset::Walk);
+        if (scene.materials) {
+            scene.materials->spheres = options.worldPreset == WorldPreset::Materials;
+        }
+    }
+    return scene;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 将小屋演示的 CPU 场景、GPU 资源和面板绑定到同一个局部生命周期。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldDemo {
     WorldScene scene;       // 编辑器与渲染器共同使用的场景
@@ -31,13 +90,12 @@ struct WorldDemo {
     WorldEditor editor;    // 借用本对象的场景并接入 ImGui
 
     //————————————————————————————————————————————————————————————————————————————————
-    // 上传网格，再按命令行选项设置初始布局和灯光。
+    // 按初始场景设置上传网格，并将同一场景交由编辑器和渲染器使用。
     //————————————————————————————————————————————————————————————————————————————————
     WorldDemo(WebGpuContext& gpu, WGPUTextureFormat format,
-              const std::filesystem::path& root, WorldPreset preset)
-        : renderer(gpu, format, scene, root), editor(scene) {
-        scene.ApplyPreset(preset);
-    }
+              const std::filesystem::path& root, const ApplicationOptions& options)
+        : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
+          editor(scene, options.scenePath, options.sculptTools) {}
 
     //————————————————————————————————————————————————————————————————————————————————
     // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
@@ -57,8 +115,8 @@ using Demo = std::variant<TriangleRenderer, WorldDemo>;
 //————————————————————————————————————————————————————————————————————————————————
 Demo CreateDemo(WebGpuContext& gpu, WGPUTextureFormat format, const std::filesystem::path& root,
                 const ApplicationOptions& options) {
-    if (options.chapter == Chapter::World) {
-        return Demo(std::in_place_type<WorldDemo>, gpu, format, root, options.worldPreset);
+    if (options.chapter != Chapter::Triangle) {
+        return Demo(std::in_place_type<WorldDemo>, gpu, format, root, options);
     }
     return Demo(std::in_place_type<TriangleRenderer>, gpu, format, root / "shaders" / "triangle.wgsl");
 }
@@ -66,7 +124,7 @@ Demo CreateDemo(WebGpuContext& gpu, WGPUTextureFormat format, const std::filesys
 //————————————————————————————————————————————————————————————————————————————————
 // 直接呈现没有 ImGui，从获得系统焦点的 GLFW 窗口读取驾驶按键。
 //————————————————————————————————————————————————————————————————————————————————
-CarInput ReadDirectDriveInput(GLFWwindow* window) {
+CarInput ReadDirectRoamInput(GLFWwindow* window) {
     if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) {
         return {};
     }
@@ -183,16 +241,47 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
 //————————————————————————————————————————————————————————————————————————————————
 int RunApplication(const ApplicationOptions& options) {
     Log log;
-    const bool isWorld = options.chapter == Chapter::World;
-    const char* title = isWorld ? "TinyWorld ch02 - Cottage, Tree and Sun"
-        : options.direct ? "TinyWorld ch01 - Direct Triangle" : "TinyWorld ch01 - Editor";
+    const auto root = ExecutableDirectory();
+    if (!options.roadMaskPath.empty()) {
+        const auto scene = CreateWorldScene(options, root);
+        ExportRoadMask(options.roadMaskPath, scene.road.value());
+        log.Write("ROAD", "wrote " + options.roadMaskPath.string());
+        return 0;
+    }
+    const bool isWorld = options.chapter != Chapter::Triangle;
+    const char* title = options.direct ? "TinyWorld ch01 - Direct Triangle" : "TinyWorld ch01 - Editor";
+    const char* ready = "WGSL and triangle pipeline validated";
+    if (options.chapter == Chapter::World) {
+        title = "TinyWorld ch02 - Cottage, Tree and Sun";
+        ready = "Chapter 02 meshes, Lambert pipeline and depth state ready";
+    } else if (options.chapter == Chapter::SunShadows) {
+        title = "TinyWorld ch03 - Sunlight and Shadows";
+        ready = "Chapter 03 meshes, sun depth and world color pipelines ready";
+    } else if (options.chapter == Chapter::Sky) {
+        title = "TinyWorld ch04 - Sky and Environment";
+        ready = "Chapter 04 cubemap, panorama, sun depth and world pipelines ready";
+    } else if (options.chapter == Chapter::Walk) {
+        title = "TinyWorld ch05 - Scene Files and Walking";
+        ready = "Chapter 05 scene and third-person world pipelines ready";
+    } else if (options.chapter == Chapter::Terrain) {
+        title = "TinyWorld ch06 - Heightfield and Robot Walk";
+        ready = "Chapter 06 heightfield chunks and robot ready";
+    } else if (options.chapter == Chapter::Sculpt) {
+        title = "TinyWorld ch07 - Sculpt a Valley";
+        ready = "Chapter 07 sculpting and version 2 scenes ready";
+    } else if (options.chapter == Chapter::Materials) {
+        title = "TinyWorld ch08 - Terrain Materials";
+        ready = "Chapter 08 PBR terrain and material samples ready";
+    } else if (options.chapter == Chapter::Road) {
+        title = "TinyWorld ch09 - Spline Roads";
+        ready = "Chapter 09 spline road and planting mask ready";
+    }
     Window window(title, options.capturePath.empty());
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
     const auto format = options.direct ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
-    Demo demo = CreateDemo(gpu, format, ExecutableDirectory(), options);
-    log.Write("GPU", isWorld ? "Chapter 02 meshes, Lambert pipeline and depth state ready"
-                             : "WGSL and triangle pipeline validated");
+    Demo demo = CreateDemo(gpu, format, root, options);
+    log.Write("GPU", ready);
 
     std::optional<EditorUi> editor;
     if (!options.direct) {
@@ -224,8 +313,12 @@ int RunApplication(const ApplicationOptions& options) {
         if (framebuffer.width != 0 && framebuffer.height != 0) {
             if (options.direct && isWorld) {
                 auto& scene = std::get<WorldDemo>(demo).scene;
-                if (scene.IsDriving()) {
-                    scene.UpdateDrive(ReadDirectDriveInput(window.Native()), static_cast<float>(frameIntervalMs / 1000.0));
+                const double seconds = frameIntervalMs / 1000.0;
+                if (scene.IsWalking()) {
+                    const auto keys = ReadDirectRoamInput(window.Native());
+                    scene.UpdateWalk({keys.throttle, keys.steering, keys.reset}, seconds);
+                } else if (scene.IsDriving()) {
+                    scene.UpdateDrive(ReadDirectRoamInput(window.Native()), static_cast<float>(seconds));
                 }
             }
             presented = RenderFrame(gpu, demo, editor ? &*editor : nullptr, log, framebuffer, frameIntervalMs);

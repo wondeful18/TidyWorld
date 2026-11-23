@@ -21,9 +21,9 @@ glm::vec3 Forward(float yawDegrees) {
 //————————————————————————————————————————————————————————————————————————————————
 // 从小屋前的草地出发，对准房屋和树之间的空地。
 //————————————————————————————————————————————————————————————————————————————————
-RoamingCar::RoamingCar(Transform& body) {
-    body = Transform{{0.9f, 0.0f, 2.8f}, {0.0f, 180.0f, 0.0f}};
-    mCamera.elevation = 24.0f;
+RoamingCar::RoamingCar(Transform& body, float elevation, const Transform& start) : mStart(start) {
+    body = mStart;
+    mCamera.elevation = elevation;
     mCamera.distance = 3.5f;
     Follow(body);
 }
@@ -33,7 +33,9 @@ RoamingCar::RoamingCar(Transform& body) {
 //————————————————————————————————————————————————————————————————————————————————
 void RoamingCar::Update(Transform& body, CarInput input, float deltaSeconds) {
     if (input.reset) {
-        *this = RoamingCar(body);
+        body = mStart;
+        mSpeed = 0.0f;
+        Follow(body);
         return;
     }
 

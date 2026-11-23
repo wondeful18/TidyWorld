@@ -3,6 +3,7 @@
 #include <glm/trigonometric.hpp>
 
 #include <cmath>
+#include <utility>
 
 namespace tinyworld {
 
@@ -19,7 +20,46 @@ glm::vec3 DirectionalSun::TowardLight() const {
 // 预设从默认布局出发，分别演示遮挡、日照和小车漫游。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldScene::ApplyPreset(WorldPreset preset) {
+    const auto shadowSettings = shadows;
+    const auto environmentSettings = environment;
+    const bool canWalk = spawn.has_value();
+    auto heightField = std::move(terrain);
+    const bool borders = showChunkBorders;
+    const bool lodAvailable = canPreviewLod;
+    const bool lod = previewLod;
+    const bool sculpting = canSculpt;
+    const auto materialView = materials;
+    auto paintMap = std::move(paint);
+    auto roadLayout = std::move(road);
     *this = WorldScene{};
+    // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
+    shadows = shadowSettings;
+    environment = environmentSettings;
+    terrain = std::move(heightField);
+    showChunkBorders = borders;
+    canPreviewLod = lodAvailable;
+    previewLod = lod;
+    canSculpt = sculpting;
+    materials = materialView;
+    paint = std::move(paintMap);
+    road = std::move(roadLayout);
+    if (materials) {
+        materials->spheres = false;
+    }
+    if (canWalk) {
+        spawn.emplace();
+    }
+    if (environment) {
+        // 让天空演示在初始视角里也能看到远处地平线。
+        camera.elevation = 7.0f;
+    }
+    if (terrain) {
+        spawn = WalkSpawn{{TerrainTrailX(10.4f), 10.4f}, 180.0f};
+        camera = {{0.0f, 0.5f, 0.0f}, 18.0f, 36.0f, 43.0f};
+        objects[1].transform.position = {4.2f, 0.0f, 1.55f};
+        objects[2].transform.position = {-3.85f, 0.0f, 3.6f};
+        objects[kCarIndex].transform.position = {-2.3f, 0.0f, 6.1f};
+    }
     switch (preset) {
     case WorldPreset::Default:
         break;
@@ -32,6 +72,54 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     case WorldPreset::Drive:
         SetDriving(true);
         break;
+    case WorldPreset::Walk:
+        SetWalking(true);
+        break;
+    case WorldPreset::Materials:
+        if (materials) {
+            materials->spheres = true;
+        }
+        break;
+    }
+    if (terrain) {
+        for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
+            auto& pos = objects[i].transform.position;
+            pos.y = terrain->HeightAt({pos.x, pos.z});
+        }
+        // 小屋地基略嵌入草坡，避免地面从较低的一侧露出整条缝。
+        objects[2].transform.position.y -= 0.16f;
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 地标继续接触原地的地面，房屋下沉量和编辑器设置的高度偏移得以保留。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldScene::SculptTerrain(glm::vec2 center, const TerrainBrush& brush, float seconds) {
+    if (!canSculpt || !terrain || IsWalking()) {
+        return;
+    }
+    std::array<float, kObjectCount> before{};
+    for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
+        const auto& p = objects[i].transform.position;
+        before[i] = terrain->HeightAt({p.x, p.z});
+    }
+    if (terrain->ApplyBrush(center, brush, seconds)) {
+        for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
+            auto& p = objects[i].transform.position;
+            p.y += terrain->HeightAt({p.x, p.z}) - before[i];
+        }
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 恢复快照时按高度差移动现有布景，保留其他编辑。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldScene::RestoreTerrain(const HeightField::Samples& samples) {
+    const auto before = *terrain;
+    terrain->ReplaceSamples(samples);
+    for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
+        auto& p = objects[i].transform.position;
+        p.y += terrain->HeightAt({p.x, p.z}) - before.HeightAt({p.x, p.z});
     }
 }
 
@@ -39,10 +127,19 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
 // 只有进入漫游时才初始化小车，退出后恢复使用编辑器相机。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldScene::SetDriving(bool active) {
-    if (active && !mCar) {
-        mCar.emplace(objects[kCarIndex].transform);
+    if (active && !mCar && !terrain) {
+        SetWalking(false);
+        auto& body = objects[kCarIndex].transform;
+        if (spawn) {
+            mParkedCar = body;
+        }
+        mCar.emplace(body, environment ? 8.0f : 24.0f, mParkedCar.value_or(RoamingCar::kDefaultStart));
     } else if (!active) {
         mCar.reset();
+        if (mParkedCar) {
+            objects[kCarIndex].transform = *mParkedCar;
+            mParkedCar.reset();
+        }
     }
 }
 
@@ -53,6 +150,52 @@ void WorldScene::UpdateDrive(CarInput input, float deltaSeconds) {
     if (mCar) {
         mCar->Update(objects[kCarIndex].transform, input, deltaSeconds);
     }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 两种游览共用视口输入，同一时刻只启用一种控制器。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldScene::SetWalking(bool active) {
+    if (active && spawn && !mWalker) {
+        if (materials) {
+            materials->spheres = false;
+        }
+        SetDriving(false);
+        mWalker.emplace(*spawn, objects[kGroundIndex].transform, Terrain());
+    } else if (!active) {
+        mWalker.reset();
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 使用当前草台变换和出生点推进步行。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldScene::UpdateWalk(WalkInput input, double deltaSeconds) {
+    if (mWalker) {
+        mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain());
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 预览与步行沿用同一个脚底坐标转换，保证进入时从预览位置出发。
+//————————————————————————————————————————————————————————————————————————————————
+Transform WorldScene::WalkerPose() const {
+    return mWalker ? mWalker->Pose() : spawn->WorldPose(objects[kGroundIndex].transform, Terrain());
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 游览结束后直接使用原编辑相机。
+//————————————————————————————————————————————————————————————————————————————————
+const OrbitCamera& WorldScene::ActiveCamera() const {
+    if (mWalker) {
+        return mWalker->Camera();
+    }
+    if (materials && materials->spheres) {
+        // 从南侧观察沿 X 排列的四颗球，固定机位便于比较高光。
+        static constexpr OrbitCamera comparison{{0.0f, -0.15f, 8.0f}, 0.0f, 9.0f, 11.4f};
+        return comparison;
+    }
+    return mCar ? mCar->Camera() : camera;
 }
 
 }  // namespace tinyworld

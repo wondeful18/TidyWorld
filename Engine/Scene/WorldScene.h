@@ -3,20 +3,27 @@
 #include "Engine/Scene/OrbitCamera.h"
 #include "Engine/Scene/RoamingCar.h"
 #include "Engine/Scene/Transform.h"
+#include "Engine/Terrain/HeightField.h"
+#include "Engine/Terrain/MaterialSplat.h"
+#include "Engine/Terrain/RoadSpline.h"
+#include "Runtime/WalkController.h"
 
 #include <array>
 #include <optional>
 
 namespace tinyworld {
 
-enum class WorldPreset { Default, Overlap, Evening, Drive };  // 第二章的演示场景
+enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials };  // 布局和游览预设
+enum class MaterialView { Lit, Weights, Roughness, VertexColor };  // 地表材质的诊断通道
+enum class SkyMode { Cubemap, Panorama };  // 第四章的两种天空投影
 
 //————————————————————————————————————————————————————————————————————————————————
 // 场景中一个可选中的静态网格实例。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldObject {
+    const char* id;        // 文件中的稳定 ID，与面板显示名称独立
     const char* name;      // 层级面板中的显示名称
-    const char* meshFile;  // 构建时部署的顶点数据文件名，空指针表示程序生成的小车
+    const char* asset;     // 相对部署目录的网格路径，或程序生成资产的标识
     Transform transform;  // 物体当前的变换
 };
 
@@ -36,24 +43,77 @@ struct DirectionalSun {
 };
 
 //————————————————————————————————————————————————————————————————————————————————
-// 第二章的完整场景数据。GPU 对象和 ImGui 交互各自由对应模块持有。
+// 第三章可编辑的太阳阴影参数。深度偏移用光源投影的 0–1 深度单位。
+//————————————————————————————————————————————————————————————————————————————————
+struct ShadowSettings {
+    static constexpr float kMaxDepthBias = 0.01f;  // 演示阴影脱离时允许的最大偏移
+    bool enabled{true};       // 是否绘制并采样 Shadow Map
+    bool pcf{true};           // 使用 3×3 比较滤波，关闭后只比较一次
+    float depthBias{0.0015f}; // 基础接收深度偏移，随表面倾斜度增加
+};
+
+//————————————————————————————————————————————————————————————————————————————————
+// 控制背景投影和车身反射。两种天空共用同一份环境内容。
+//————————————————————————————————————————————————————————————————————————————————
+struct EnvironmentSettings {
+    SkyMode sky{SkyMode::Cubemap}; // 背景使用天空盒或全景天空球
+    bool carReflection{true};     // 车漆和玻璃是否采样环境 Cubemap
+};
+
+//————————————————————————————————————————————————————————————————————————————————
+// 第八章材质观察选项，关掉观察后可继续雕刻或步行。
+//————————————————————————————————————————————————————————————————————————————————
+struct MaterialPreview {
+    MaterialView view{MaterialView::Lit};  // 当前显示的地表通道
+    bool spheres{};                        // 是否查看固定机位的材质球
+};
+
+//————————————————————————————————————————————————————————————————————————————————
+// 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
+    static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
     static constexpr std::size_t kCarIndex = 3;  // 小车排在三件常驻物体后面
     static constexpr std::size_t kObjectCount = kCarIndex + 1;  // 包含小车的最大物体数
     std::array<WorldObject, kObjectCount> objects{{
-        {"Ground", "ground.twmesh", {}},
-        {"Tree", "tree.twmesh", {{2.54f, 0.0f, 0.52f}}},
-        {"Cottage", "house.twmesh", {{-1.78f, 0.0f, 0.16f}}},
-        {"Car", nullptr, {}},
+        {"ground", "Ground", "models/ch02/ground.twmesh", {}},
+        {"tree", "Tree", "models/ch02/tree.twmesh", {{2.54f, 0.0f, 0.52f}}},
+        {"cottage", "Cottage", "models/ch02/house.twmesh", {{-1.78f, 0.0f, 0.16f}}},
+        {"car", "Car", "builtin:car", RoamingCar::kDefaultStart},
     }};                        // 绘制顺序，重叠演示中的树先于房子提交
     OrbitCamera camera;        // 当前相机参数
     DirectionalSun sun;        // 当前太阳参数
+    std::optional<ShadowSettings> shadows;  // 仅在支持太阳阴影的章节中设置
+    std::optional<EnvironmentSettings> environment;  // 仅在有天空演示的章节中设置
+    std::optional<WalkSpawn> spawn;  // 第五章的步行入口，支持持久化
+    std::optional<HeightField> terrain;  // 第六章的全局高度样点
+    bool showChunkBorders{};  // 是否在颜色通道叠画地形的内部边界
+    bool canPreviewLod{};  // 第六章可以切换远处块的教学 LOD
+    bool previewLod{};  // 是否按距离使用粗网格
+    bool canSculpt{};  // 第七章启用编辑和第二版场景文件
+    std::optional<MaterialPreview> materials;  // 第八章的地表材质观察选项
+    std::optional<MaterialSplat> paint;  // 第八章的共享 RGBA 权重图
+    std::optional<RoadSpline> road;  // 第九章保存道路控制点与宽度
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 借用可选的高度场。只在本次地面查询或网格生成期间使用。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] const HeightField* Terrain() const { return terrain ? &*terrain : nullptr; }
 
     //————————————————————————————————————————————————————————————————————————————————
     // 重置场景，然后应用指定的演示布局。
     //————————————————————————————————————————————————————————————————————————————————
     void ApplyPreset(WorldPreset preset);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 雕刻地面并按高度差移动地标，保留原先的离地量。
+    //————————————————————————————————————————————————————————————————————————————————
+    void SculptTerrain(glm::vec2 center, const TerrainBrush& brush, float seconds);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 恢复编辑历史中的样点，并保留布景相对地面的高度偏移。
+    //————————————————————————————————————————————————————————————————————————————————
+    void RestoreTerrain(const HeightField::Samples& samples);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 进入或退出漫游，保留编辑器相机和三件常驻物体的状态。
@@ -71,12 +131,34 @@ struct WorldScene {
     void UpdateDrive(CarInput input, float deltaSeconds);
 
     //————————————————————————————————————————————————————————————————————————————————
+    // 开始步行时从出生点创建临时角色，结束后回到先前的编辑视角。
+    //————————————————————————————————————————————————————————————————————————————————
+    void SetWalking(bool active);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 查询步行模式是否活跃。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] bool IsWalking() const { return mWalker.has_value(); }
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 将视口输入交给固定时间步控制器。
+    //————————————————————————————————————————————————————————————————————————————————
+    void UpdateWalk(WalkInput input, double deltaSeconds);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 编辑时返回出生预览，步行时返回当前脚底变换。仅在 spawn 有值时调用。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] Transform WalkerPose() const;
+
+    //————————————————————————————————————————————————————————————————————————————————
     // 返回当前模式使用的相机。
     //————————————————————————————————————————————————————————————————————————————————
-    [[nodiscard]] const OrbitCamera& ActiveCamera() const { return mCar ? mCar->Camera() : camera; }
+    [[nodiscard]] const OrbitCamera& ActiveCamera() const;
 
 private:
     std::optional<RoamingCar> mCar;  // 仅在漫游模式下保存驾驶和跟随状态
+    std::optional<Transform> mParkedCar;  // 第五章进入驾驶前的编辑变换
+    std::optional<WalkController> mWalker;  // 仅在步行检查中存在，退出即丢弃
 };
 
 }  // namespace tinyworld

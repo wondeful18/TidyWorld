@@ -11,12 +11,19 @@ namespace tinyworld {
 //————————————————————————————————————————————————————————————————————————————————
 // 绕 Y 轴确定方位，并用仰角确定相机高度。
 //————————————————————————————————————————————————————————————————————————————————
-glm::mat4 OrbitCamera::View() const {
+glm::vec3 OrbitCamera::Position() const {
     const float yaw = glm::radians(azimuth);
     const float pitch = glm::radians(elevation);
     const glm::vec3 offset{std::sin(yaw) * std::cos(pitch), std::sin(pitch),
                            std::cos(yaw) * std::cos(pitch)};
-    return glm::lookAtRH(target + distance * offset, target, glm::vec3{0.0f, 1.0f, 0.0f});
+    return target + distance * offset;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 颜色通道和环境反射共用同一个相机位置。
+//————————————————————————————————————————————————————————————————————————————————
+glm::mat4 OrbitCamera::View() const {
+    return glm::lookAtRH(Position(), target, glm::vec3{0.0f, 1.0f, 0.0f});
 }
 
 //————————————————————————————————————————————————————————————————————————————————
