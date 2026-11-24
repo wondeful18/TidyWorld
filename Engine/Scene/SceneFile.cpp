@@ -484,6 +484,7 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
         loaded.paint.emplace();
     }
     loaded.showChunkBorders = scene.showChunkBorders;
+    loaded.terrainPreview = scene.terrainPreview;
     loaded.materials = scene.materials;
     loaded.water = scene.water;
     loaded.atmosphere = scene.atmosphere;

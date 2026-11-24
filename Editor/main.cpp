@@ -30,6 +30,8 @@ int main(int argc, char** argv) {
             options.direct = true;
         } else if (argument == "--smoke-test") {
             options.smokeTest = true;
+        } else if (argument == "--benchmark-terrain") {
+            options.benchmarkTerrain = true;
         } else if (argument == "--benchmark-vegetation") {
             options.benchmarkVegetation = true;
         } else if (argument == "--chunk-borders") {
@@ -82,8 +84,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Lightmap;
             } else if (value == "18") {
                 options.chapter = tinyworld::Chapter::DayCycle;
+            } else if (value == "19") {
+                options.chapter = tinyworld::Chapter::TerrainVisibility;
             } else {
-                std::cerr << "Choose chapter 01 through 18.\n";
+                std::cerr << "Choose chapter 01 through 19.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -163,6 +167,21 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             options.waterTime = seconds;
+        } else if ((argument == "--terrain-lod" || argument == "--terrain-cull") && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value != "on" && value != "off") {
+                std::cerr << "Choose terrain option on or off.\n";
+                return EXIT_FAILURE;
+            }
+            auto& option = argument == "--terrain-lod" ? options.terrainLod : options.terrainCull;
+            option = value == "on";
+        } else if (argument == "--terrain-view" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value.size() != 1 || value.front() < '0' || value.front() > '3') {
+                std::cerr << "Choose terrain view 0 through 3.\n";
+                return EXIT_FAILURE;
+            }
+            options.terrainView = static_cast<std::size_t>(value.front() - '0');
         } else if (argument == "--time" && index + 1 < argc) {
             float hour{};
             if (!ParseFloatInRange(argv[++index], hour, 0.0f, 24.0f)) {
@@ -193,7 +212,7 @@ int main(int argc, char** argv) {
             }
             options.shadowDistance = metres;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..18] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..19] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -208,7 +227,9 @@ int main(int argc, char** argv) {
                          "Chapter 15+: [--preset shore]\n"
                          "Chapter 16+: [--fog on|off] [--shadow-distance metres]\n"
                          "Chapter 17+: [--lightmap on|off] [--preset porch]\n"
-                         "Chapter 18: [--time hours]\n";
+                         "Chapter 18+: [--time hours]\n"
+                         "Chapter 19+: [--terrain-lod on|off] [--terrain-cull on|off] [--terrain-view 0..3]\n"
+                         "Chapter 19: [--benchmark-terrain]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -240,6 +261,23 @@ int main(int argc, char** argv) {
     }
     if ((options.waterView || options.waterTime) && options.chapter < tinyworld::Chapter::Water) {
         std::cerr << "Water options require chapter 14.\n";
+        return EXIT_FAILURE;
+    }
+    if ((options.terrainLod || options.terrainCull || options.terrainView) &&
+        options.chapter < tinyworld::Chapter::TerrainVisibility) {
+        std::cerr << "Terrain visibility options require chapter 19 or later.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.benchmarkTerrain &&
+        (options.chapter != tinyworld::Chapter::TerrainVisibility || options.smokeTest ||
+         options.benchmarkVegetation || !options.capturePath.empty() || !options.roadMaskPath.empty() ||
+         options.worldPreset != tinyworld::WorldPreset::Default || options.terrainView ||
+         options.terrainCull || options.terrainLod)) {
+        std::cerr << "Run the chapter 19 terrain benchmark separately with its default route and toggles.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.terrainView && options.worldPreset != tinyworld::WorldPreset::Default) {
+        std::cerr << "Choose either a terrain view or a scene preset.\n";
         return EXIT_FAILURE;
     }
     if (options.dayHour && options.chapter < tinyworld::Chapter::DayCycle) {

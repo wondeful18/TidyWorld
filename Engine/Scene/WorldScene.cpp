@@ -27,6 +27,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     const bool borders = showChunkBorders;
     const bool lodAvailable = canPreviewLod;
     const bool lod = previewLod;
+    const auto terrainPreviewSettings = terrainPreview;
     const bool sculpting = canSculpt;
     const auto materialView = materials;
     auto paintMap = std::move(paint);
@@ -47,6 +48,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     showChunkBorders = borders;
     canPreviewLod = lodAvailable;
     previewLod = lod;
+    terrainPreview = terrainPreviewSettings;
     canSculpt = sculpting;
     materials = materialView;
     paint = std::move(paintMap);

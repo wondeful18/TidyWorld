@@ -7,6 +7,7 @@
 #include "Engine/Scene/Transform.h"
 #include "Engine/Scene/WaterSettings.h"
 #include "Engine/Terrain/HeightField.h"
+#include "Engine/Terrain/TerrainVisibility.h"
 #include "Engine/Terrain/MaterialSplat.h"
 #include "Engine/Terrain/RoadSpline.h"
 #include "Engine/Terrain/Vegetation.h"
@@ -84,6 +85,12 @@ struct MaterialPreview {
 // 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
+    static constexpr std::array<OrbitCamera, 4> kTerrainRoute{{
+        {{-13.0f, 2.0f, 12.0f}, 27.0f, 17.0f, 12.0f},
+        {{-2.0f, 0.6f, 5.0f}, 12.0f, 20.0f, 10.0f},
+        {{5.0f, 0.7f, -3.0f}, 235.0f, 22.0f, 12.0f},
+        {{17.0f, 0.5f, -12.0f}, 225.0f, 22.0f, 10.0f},
+    }};  // 西南坡、桥头、河口、海岬的固定机位
     static constexpr OrbitCamera kDayCamera{{9.0f, 1.4f, 1.6f}, -30.0f, 15.0f, 28.0f};
     static constexpr OrbitCamera kPorchCamera{{3.55f, 1.17f, 7.75f}, 24.0f, 22.0f, 9.0f};
     static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
@@ -103,6 +110,7 @@ struct WorldScene {
     std::optional<WalkSpawn> spawn;  // 第五章的步行入口，支持持久化
     std::optional<HeightField> terrain;  // 第六章的全局高度样点
     bool showChunkBorders{};  // 是否在颜色通道叠画地形的内部边界
+    std::optional<TerrainPreview> terrainPreview; // 第十九章的独立 LOD 和视锥开关
     bool canPreviewLod{};  // 第六章可以切换远处块的教学 LOD
     bool previewLod{};  // 是否按距离使用粗网格
     bool canSculpt{};  // 第七章启用编辑和第二版场景文件

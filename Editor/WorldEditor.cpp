@@ -104,13 +104,14 @@ void BrushOutline(const HeightField& field, glm::vec2 center, float radius, bool
 // 场景路径以 UTF-8 交给 ImGui。省略路径时使用工作目录中的默认文件名。
 //————————————————————————————————————————————————————————————————————————————————
 WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt,
-                         MaterialPreviews previews, const VegetationDrawStats* vegetationStats)
-    : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mSculptEnabled(sculpt && scene.canSculpt) {
+                         MaterialPreviews previews, const VegetationDrawStats* vegetationStats,
+                         const TerrainDrawStats* terrainStats)
+    : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mTerrainStats(terrainStats), mSculptEnabled(sculpt && scene.canSculpt) {
     if (mScene.shadows) {
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.dayCycle ? kDayCyclePanel : mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.terrainPreview ? kTerrainPanel : mScene.dayCycle ? kDayCyclePanel : mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
@@ -244,6 +245,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
         SelectForEditing(kWaterPanel);
+    }
+    if (mScene.terrainPreview && ImGui::Selectable("Terrain performance", mSelected == kTerrainPanel)) {
+        SelectForEditing(kTerrainPanel);
     }
     if (mScene.dayCycle && ImGui::Selectable("Day / night", mSelected == kDayCyclePanel)) {
         SelectForEditing(kDayCyclePanel);
@@ -407,6 +411,25 @@ void WorldEditor::DrawInspector() {
             ImGui::TextWrapped("Left to right: dielectric (0.24 / 0.62), metal (0.24 / 0.62).");
         } else if (materials->view == MaterialView::Weights) {
             ImGui::TextWrapped("Grass (green), gravel (red), rock (blue), sand (ochre).");
+        }
+        return;
+    }
+    if (auto& terrain = mScene.terrainPreview; terrain && mSelected == kTerrainPanel && !mSculptEnabled) {
+        ImGui::Checkbox("Distance LOD", &terrain->lod);
+        ImGui::Checkbox("Camera frustum culling", &terrain->cull);
+        ImGui::BeginDisabled(mScene.IsWalking());
+        constexpr std::array names{"Slope", "Bridge", "River", "Cape"};
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i != 0) ImGui::SameLine();
+            if (ImGui::Button(names[i])) mScene.camera = WorldScene::kTerrainRoute[i];
+        }
+        ImGui::EndDisabled();
+        if (mTerrainStats) {
+            const auto& stats = *mTerrainStats;
+            ImGui::Text("Visible %u | Culled %u", stats.visible, stats.culled);
+            ImGui::Text("LOD 0: %u | LOD 1: %u", stats.fine, stats.coarse);
+            ImGui::Text("Color triangles: %u", stats.colorTriangles);
+            ImGui::Text("Shadow triangles: %u", stats.shadowTriangles);
         }
         return;
     }

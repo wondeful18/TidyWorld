@@ -36,6 +36,7 @@ public:
     [[nodiscard]] MaterialPreviews PaintPreviews() const {
         return mMaterials ? mMaterials->PreviewViews() : MaterialPreviews{};
     }
+    [[nodiscard]] const TerrainDrawStats& TerrainStatistics() const { return mTerrainStats; }
     [[nodiscard]] const VegetationDrawStats& VegetationStatistics() const { return mVegetationStats; }
 
     //————————————————————————————————————————————————————————————————————————————————
@@ -95,7 +96,7 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     // 提交地形块与已上传变换的物体，供两个绘制通道共用。
     //————————————————————————————————————————————————————————————————————————————————
-    void DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount, bool showSpheres) const;
+    void DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount, bool showSpheres, bool shadows);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 绑定一个网格的顶点与 uniform，提交一次非索引绘制。
@@ -139,6 +140,9 @@ private:
     std::array<GltfPrototype, kPropAssets.size() - kBuiltinPropCount> mGltfProps;  // 课程 glTF 资产原型
     std::vector<Drawable> mTerrainDraws;                    // 每个整数块键对应一次绘制
     std::vector<Drawable> mCoarseTerrainDraws;              // 第六章同一批块的 LOD1 网格
+    std::array<TerrainBounds, HeightField::kChunkCount> mTerrainBounds{}; // 两档网格共用的包围盒
+    std::array<bool, HeightField::kChunkCount> mTerrainVisible{}; // 仅限制相机通道
+    TerrainDrawStats mTerrainStats;
     std::array<bool, HeightField::kChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级
     std::array<Drawable, 4> mMaterialSpheres;                // 成对比较粗糙度与金属度的球
     std::optional<Drawable> mChunkBorders;                  // 仅供颜色通道绘制的边界提示

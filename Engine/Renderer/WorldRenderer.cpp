@@ -276,10 +276,11 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
                 const auto mesh = MakeTerrainChunk(*terrain, {x, z}, !scene.road);
                 const auto index = mTerrainDraws.size();
                 mTerrainDraws.push_back(UploadMesh(WithReflectivity(mesh), layout, "Terrain chunk"));
-                if (scene.canPreviewLod) {
-                    const auto coarse = MakeTerrainChunk(*terrain, {x, z}, true, true);
+                if (scene.canPreviewLod || scene.terrainPreview) {
+                    const auto coarse = MakeTerrainChunk(*terrain, {x, z}, !scene.road, true);
                     mCoarseTerrainDraws.push_back(UploadMesh(WithReflectivity(coarse), layout, "Terrain LOD 1"));
                 }
+                if (scene.terrainPreview) mTerrainBounds[index] = MeasureTerrainBounds(*terrain, {x, z});
                 mChunkRevisions[index] = terrain->ChunkRevision(index);
             }
         }
@@ -302,6 +303,12 @@ void WorldRenderer::SyncTerrain(const HeightField& field, bool showBorders, bool
             const auto vertices = WithReflectivity(MakeTerrainChunk(field, {x, z}, paintTrail));
             wgpuQueueWriteBuffer(mGpu.Queue(), mTerrainDraws[index].vertices.get(), 0,
                                  vertices.data(), vertices.size() * sizeof(WorldVertex));
+            if (!mCoarseTerrainDraws.empty()) {
+                const auto coarse = WithReflectivity(MakeTerrainChunk(field, {x, z}, paintTrail, true));
+                wgpuQueueWriteBuffer(mGpu.Queue(), mCoarseTerrainDraws[index].vertices.get(), 0,
+                                     coarse.data(), coarse.size() * sizeof(WorldVertex));
+                mTerrainBounds[index] = MeasureTerrainBounds(field, {x, z});
+            }
             mChunkRevisions[index] = revision;
         }
     }
@@ -450,15 +457,6 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         }
     }
     const auto& camera = scene.ActiveCamera();
-    if (!mCoarseTerrainDraws.empty()) {
-        std::size_t i = 0;
-        const auto eye = camera.Position();
-        for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
-            for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x, ++i) {
-                mCoarseChoice[i] = scene.previewLod && IsCoarseTerrainChunk({x, z}, eye);
-            }
-        }
-    }
     const bool hasCoast = scene.water && scene.water->coast;
     const auto projection = camera.Projection(static_cast<float>(size.width) / size.height, true,
                                               hasCoast ? WaterSettings::kCoastFar : 80.0f);
@@ -467,6 +465,14 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const auto view = camera.View();
     const glm::mat4 vp = projection * view;
     const auto eye = camera.Position();
+    mTerrainStats = {};
+    const auto frustum = MakeTerrainFrustum(vp);
+    const bool useLod = scene.terrainPreview ? scene.terrainPreview->lod : scene.previewLod;
+    const bool cull = scene.terrainPreview && scene.terrainPreview->cull;
+    for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        mCoarseChoice[i] = useLod && IsCoarseTerrainChunk(TerrainKey(i), eye);
+        mTerrainVisible[i] = !cull || IntersectsTerrainFrustum(frustum, mTerrainBounds[i]);
+    }
     const auto light = scene.dayCycle ? EvaluateDaylight(scene.dayCycle->hour) : Daylight{scene.sun};
     const glm::vec4 lighting{light.ambient, light.nightMix, 0.0f, 0.0f};
     const glm::vec4 horizon = hasCoast && mSky
@@ -571,7 +577,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     }
     if (renderShadow) {
         auto depthPass = mShadowMap->Begin(encoder);
-        DrawObjects(depthPass.get(), visibleCount, showSpheres);
+        DrawObjects(depthPass.get(), visibleCount, showSpheres, true);
         if (!showSpheres) DrawProps(depthPass.get(), scene.props, PropPass::Shadows);
         if (showVegetation) {
             wgpuRenderPassEncoderSetPipeline(depthPass.get(), mShadowMap->VegetationPipeline());
@@ -594,7 +600,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     if (mMaterials) {
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 3, mMaterials->Binding(), 0, nullptr);
     }
-    DrawObjects(pass.get(), visibleCount, showSpheres);
+    DrawObjects(pass.get(), visibleCount, showSpheres, false);
     if (!showSpheres) DrawProps(pass.get(), scene.props, PropPass::BuiltinColor);
     if (showRoad) {
         // 路面接收地形和地标的阴影；薄路面本身只在颜色通道绘制。
@@ -625,9 +631,23 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
 //————————————————————————————————————————————————————————————————————————————————
 // 两个通道读取同一份顶点与物体变换，保证角色和车辆也能投影。
 //————————————————————————————————————————————————————————————————————————————————
-void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount, bool showSpheres) const {
+void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount,
+                                bool showSpheres, bool shadows) {
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
-        DrawMesh(pass, mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i]);
+        // 相机画面外的地形仍可能把阴影投到画面内。
+        if (!shadows && !mTerrainVisible[i]) {
+            ++mTerrainStats.culled;
+            continue;
+        }
+        const auto& draw = mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i];
+        DrawMesh(pass, draw);
+        if (shadows) {
+            mTerrainStats.shadowTriangles += draw.count / 3;
+        } else {
+            ++mTerrainStats.visible;
+            ++(mCoarseChoice[i] ? mTerrainStats.coarse : mTerrainStats.fine);
+            mTerrainStats.colorTriangles += draw.count / 3;
+        }
     }
     for (std::size_t i = mTerrainDraws.empty() ? 0 : 1; i < visibleCount; ++i) {
         DrawMesh(pass, mDraws[i]);

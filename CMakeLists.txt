@@ -93,6 +93,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Terrain/MaterialSplat.h
     Engine/Terrain/RoadSpline.cpp
     Engine/Terrain/RoadSpline.h
+    Engine/Terrain/TerrainVisibility.cpp
+    Engine/Terrain/TerrainVisibility.h
     Engine/Terrain/TerrainMesh.cpp
     Engine/Terrain/TerrainMesh.h
     Engine/Terrain/Vegetation.cpp
@@ -262,7 +264,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(check Village Coast Lightmap DayCycle)
+    foreach(check Village Coast Lightmap DayCycle TerrainVisibility)
         set(check_target TinyWorld${check}Checks)
         add_executable(${check_target} Tests/${check}Checks.cpp)
         target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
@@ -275,6 +277,7 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME VillageChecks
         COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME TerrainVisibilityChecks COMMAND TinyWorldTerrainVisibilityChecks)
     add_test(NAME CoastChecks COMMAND TinyWorldCoastChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
     target_sources(TinyWorldLightmapChecks PRIVATE Tools/LightmapBaker/Bake.cpp)
     add_test(NAME LightmapChecks

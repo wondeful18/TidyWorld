@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <variant>
 
 namespace tinyworld {
@@ -95,6 +96,9 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
     }
     if (options.chapter >= Chapter::DayCycle) scene.dayCycle.emplace();
+    if (options.chapter >= Chapter::TerrainVisibility) {
+        scene.terrainPreview = TerrainPreview{options.terrainLod.value_or(true), options.terrainCull.value_or(true)};
+    }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
@@ -119,6 +123,12 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
             scene.materials->spheres = options.worldPreset == WorldPreset::Materials;
         }
     }
+    if (scene.terrainPreview && !scene.IsWalking()) {
+        if (options.terrainView) scene.camera = WorldScene::kTerrainRoute[*options.terrainView];
+        else if (options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
+            scene.camera = WorldScene::kTerrainRoute[1];
+        }
+    }
     if (scene.dayCycle && options.dayHour) scene.dayCycle->hour = WrapDayHour(*options.dayHour);
     return scene;
 }
@@ -138,7 +148,7 @@ struct WorldDemo {
               const std::filesystem::path& root, const ApplicationOptions& options)
         : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
           editor(scene, options.scenePath, options.sculptTools || options.chapter == Chapter::Sculpt,
-                 renderer.PaintPreviews(), &renderer.VegetationStatistics()) {}
+                 renderer.PaintPreviews(), &renderer.VegetationStatistics(), &renderer.TerrainStatistics()) {}
 
     //————————————————————————————————————————————————————————————————————————————————
     // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
@@ -319,6 +329,49 @@ void BenchmarkVegetation(WebGpuContext& gpu, WorldDemo& world) {
     }
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 四个机位各测 24 帧。固定光照、水相位和输出尺寸，每帧等 GPU 完成再计整帧耗时。
+//————————————————————————————————————————————————————————————————————————————————
+void BenchmarkTerrain(WebGpuContext& gpu, WorldDemo& world) {
+    using Clock = std::chrono::steady_clock;
+    using Milliseconds = std::chrono::duration<double, std::milli>;
+    constexpr PixelSize size{1280, 720};
+    constexpr int samplesPerView = 24;
+    constexpr int frames = samplesPerView * static_cast<int>(WorldScene::kTerrainRoute.size());
+    FrameCapture target(gpu, size);
+    for (const auto [name, lod, cull] : {
+         std::tuple{"full", false, false}, std::tuple{"lod", true, false},
+         std::tuple{"cull", false, true}, std::tuple{"lod+cull", true, true}}) {
+        world.scene.terrainPreview = TerrainPreview{lod, cull};
+        std::array<double, frames> elapsed{};
+        unsigned blocks{}, color{}, shadow{};
+        int sample = 0;
+        for (const auto& pose : WorldScene::kTerrainRoute) {
+            world.scene.camera = pose;
+            for (int i = -8; i < samplesPerView; ++i) {
+                const auto start = Clock::now();
+                EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
+                if (!encoder) throw std::runtime_error("Cannot create terrain benchmark encoder.");
+                world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
+                SubmitFrame(gpu, encoder.get());
+                wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
+                gpu.ProcessEvents();
+                if (i < 0) continue;
+                elapsed[sample++] = Milliseconds(Clock::now() - start).count();
+                const auto& stats = world.renderer.TerrainStatistics();
+                blocks += stats.visible;
+                color += stats.colorTriangles;
+                shadow += stats.shadowTriangles;
+            }
+        }
+        std::sort(elapsed.begin(), elapsed.end());
+        std::printf("%s | %d frames | visible %.2f | color triangles %.0f | shadow triangles %.0f"
+                    " | p50 %.3f ms | p95 %.3f ms\n", name, frames,
+                    double(blocks) / frames, double(color) / frames, double(shadow) / frames,
+                    (elapsed[frames / 2 - 1] + elapsed[frames / 2]) * 0.5, elapsed[(frames * 95 + 99) / 100 - 1]);
+    }
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -389,12 +442,21 @@ int RunApplication(const ApplicationOptions& options) {
         title = "TinyWorld ch18 - Day and Night";
         ready = "Chapter 18 shared day-night sky, reflections and solar shadows ready";
     }
-    Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
+    if (options.chapter == Chapter::TerrainVisibility) {
+        title = "TinyWorld ch19 - Terrain LOD and Frustum Culling";
+        ready = "Chapter 19 stitched LOD and camera terrain culling ready";
+    }
+    const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain;
+    Window window(title, options.capturePath.empty() && !benchmark);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
-    const auto format = options.direct || options.benchmarkVegetation ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
+    const auto format = options.direct || benchmark ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
     Demo demo = CreateDemo(gpu, format, root, options);
     log.Write("GPU", ready);
+    if (options.benchmarkTerrain) {
+        BenchmarkTerrain(gpu, std::get<WorldDemo>(demo));
+        return 0;
+    }
     if (options.benchmarkVegetation) {
         BenchmarkVegetation(gpu, std::get<WorldDemo>(demo));
         return 0;

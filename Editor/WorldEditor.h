@@ -24,7 +24,8 @@ public:
     // 借用本章的场景数据。第三章打开时先显示太阳属性。
     //————————————————————————————————————————————————————————————————————————————————
     explicit WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt = false,
-                         MaterialPreviews previews = {}, const VegetationDrawStats* vegetationStats = nullptr);
+                         MaterialPreviews previews = {}, const VegetationDrawStats* vegetationStats = nullptr,
+                         const TerrainDrawStats* terrainStats = nullptr);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 在可编辑地形的视口顶部显示模式按钮与雕刻历史。
@@ -55,7 +56,8 @@ private:
     static constexpr std::size_t kAtmospherePanel = kWaterPanel + 1;  // 距离雾与阴影距离选项
     static constexpr std::size_t kLightmapPanel = kAtmospherePanel + 1;
     static constexpr std::size_t kDayCyclePanel = kLightmapPanel + 1;
-    static constexpr std::size_t kFirstProp = kDayCyclePanel + 1;
+    static constexpr std::size_t kTerrainPanel = kDayCyclePanel + 1;
+    static constexpr std::size_t kFirstProp = kTerrainPanel + 1;
     enum class GizmoMode { Move, Rotate, Scale };
     //————————————————————————————————————————————————————————————————————————————————
     // 提供场景路径和保存、重开按钮，在面板内报告结果。
@@ -110,6 +112,7 @@ private:
     WorldScene& mScene;                        // 与渲染器共享的 CPU 场景
     MaterialPreviews mPreviews;                // 借用渲染器的四个底色贴图切片
     const VegetationDrawStats* mVegetationStats;  // 渲染器记录上一帧实际提交的批次
+    const TerrainDrawStats* mTerrainStats;       // 上一帧地形统计
     std::optional<std::size_t> mSelected{2};   // 物体索引，kObjectCount 表示出生点，空值表示太阳
     std::array<char, 4096> mScenePath{};       // ImGui 编辑的 UTF-8 文件路径
     std::string mSceneStatus;                 // 最近一次保存或重开的结果
