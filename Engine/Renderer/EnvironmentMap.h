@@ -2,7 +2,10 @@
 
 #include "Engine/Renderer/WgpuHandle.h"
 
+#include <array>
 #include <filesystem>
+
+#include <glm/vec3.hpp>
 
 namespace tinyworld {
 
@@ -29,7 +32,13 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     [[nodiscard]] WGPUBindGroup Binding() const { return mBinding.get(); }
 
+    //————————————————————————————————————————————————————————————————————————————————
+    // 从同一张全景图取得观察方向附近的天际线色，返回线性 RGB。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] glm::vec3 HorizonColor(glm::vec3 direction) const;
+
 private:
+    std::array<glm::vec3, 32> mHorizon{};  // 沿经度采样的 32 个低空平均色，在线性空间插值
     TextureHandle mCube;           // 六层 sRGB 纹理，面顺序为 +X、-X、+Y、-Y、+Z、-Z
     TextureHandle mPanorama;       // 单层 2:1 等距柱状 sRGB 纹理
     TextureViewHandle mCubeView;   // 以 Cube 维度解释六层纹理

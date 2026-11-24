@@ -4,6 +4,7 @@
 struct SkyUniform {
     rotationProjection: mat4x4<f32>, // 方向到裁剪空间，不含相机平移
     options: vec4<f32>,             // x 为全景天空球开关，其余保留
+    horizon: vec4<f32>,             // 海岸天际线的线性 RGB，w 为开关
 }
 
 @group(0) @binding(0) var<uniform> sky: SkyUniform;
@@ -43,10 +44,18 @@ fn panoramaUv(direction: vec3<f32>) -> vec2<f32> {
 // 以世界方向直接采样立方体，或先换算成全景图的二维坐标。
 //————————————————————————————————————————————————————————————————————————————————
 fn sampleSky(direction: vec3<f32>) -> vec4<f32> {
+    var sampled: vec4<f32>;
     if (sky.options.x > 0.5) {
-        return textureSampleLevel(panorama, panoSampler, panoramaUv(direction), 0.0);
+        sampled = textureSampleLevel(panorama, panoSampler, panoramaUv(direction), 0.0);
+    } else {
+        sampled = textureSampleLevel(skyCube, cubeSampler, direction, 0.0);
     }
-    return textureSampleLevel(skyCube, cubeSampler, direction, 0.0);
+    if (sky.horizon.w > 0.5) {
+        // 海平面上方保留照片的云层，靠近地平线逐渐衔接远海的颜色。
+        let skyWeight = smoothstep(0.025, 0.25, direction.y);
+        sampled = vec4<f32>(mix(sky.horizon.rgb, sampled.rgb, skyWeight), sampled.a);
+    }
+    return sampled;
 }
 
 //————————————————————————————————————————————————————————————————————————————————

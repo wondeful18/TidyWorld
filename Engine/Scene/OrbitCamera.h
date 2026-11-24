@@ -25,9 +25,9 @@ struct OrbitCamera {
     [[nodiscard]] glm::mat4 View() const;
 
     //————————————————————————————————————————————————————————————————————————————————
-    // 返回透视投影。zeroToOne 选择 WebGPU 使用的深度区间。
+    // 返回透视投影。zeroToOne 选择 WebGPU 深度区间，minimumFar 为远面最小米数。
     //————————————————————————————————————————————————————————————————————————————————
-    [[nodiscard]] glm::mat4 Projection(float aspect, bool zeroToOne = true) const;
+    [[nodiscard]] glm::mat4 Projection(float aspect, bool zeroToOne = true, float minimumFar = 80.0f) const;
 };
 
 }  // namespace tinyworld

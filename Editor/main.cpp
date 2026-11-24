@@ -75,8 +75,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Village;
             } else if (value == "14") {
                 options.chapter = tinyworld::Chapter::Water;
+            } else if (value == "15") {
+                options.chapter = tinyworld::Chapter::Coast;
             } else {
-                std::cerr << "Choose chapter 01 through 14.\n";
+                std::cerr << "Choose chapter 01 through 15.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -91,8 +93,10 @@ int main(int argc, char** argv) {
                 options.worldPreset = tinyworld::WorldPreset::Walk;
             } else if (value == "materials") {
                 options.worldPreset = tinyworld::WorldPreset::Materials;
+            } else if (value == "shore") {
+                options.worldPreset = tinyworld::WorldPreset::Shore;
             } else {
-                std::cerr << "Choose preset overlap, evening, drive, walk or materials.\n";
+                std::cerr << "Choose preset overlap, evening, drive, walk, materials or shore.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--no-shadows" || argument == "--hard-shadows" || argument == "--shadow-bias") {
@@ -152,7 +156,7 @@ int main(int argc, char** argv) {
             }
             options.waterTime = seconds;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..14] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..15] [--preset overlap|evening|drive|walk|materials|shore] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -163,7 +167,8 @@ int main(int argc, char** argv) {
                          "Chapter 08+: [--preset materials]\n"
                          "Chapter 09+: [--export-road-mask output.pgm]\n"
                          "Chapter 11+: [--benchmark-vegetation]\n"
-                         "Chapter 14: [--water lit|depth|no-reflection|off] [--water-time seconds]\n";
+                         "Chapter 14+: [--water lit|depth|no-reflection|off] [--water-time seconds]\n"
+                         "Chapter 15+: [--preset shore]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -208,6 +213,10 @@ int main(int argc, char** argv) {
     }
     if (options.worldPreset == tinyworld::WorldPreset::Walk && options.chapter < tinyworld::Chapter::Walk) {
         std::cerr << "The walk preset requires chapter 05 or later.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.worldPreset == tinyworld::WorldPreset::Shore && options.chapter < tinyworld::Chapter::Coast) {
+        std::cerr << "The shore preset requires chapter 15 or later.\n";
         return EXIT_FAILURE;
     }
     if (options.worldPreset == tinyworld::WorldPreset::Materials && options.chapter < tinyworld::Chapter::Materials) {

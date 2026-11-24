@@ -70,7 +70,8 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
     scene.canPlaceProps = options.chapter >= Chapter::Props;
     scene.canUseGltfProps = options.chapter >= Chapter::Village;
     if (scene.canUseGltfProps && options.scenePath.empty()) {
-        scenePath = root / "scenes" / "ch13" / "village.json";
+        scenePath = options.chapter >= Chapter::Coast ? root / "scenes" / "ch15" / "coast.json"
+                                                       : root / "scenes" / "ch13" / "village.json";
     }
     if (options.chapter >= Chapter::Meadow) {
         scene.vegetation.emplace();
@@ -78,6 +79,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
     }
     if (options.chapter >= Chapter::Water) {
         scene.water.emplace();
+        scene.water->coast = options.chapter >= Chapter::Coast;
         scene.water->view = options.waterView.value_or(WaterView::Lit);
         scene.water->seconds = options.waterTime.value_or(0.0f);
     }
@@ -94,6 +96,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.environmentOverrides) {
             scene.environment = options.environmentOverrides;
         }
+        if (options.worldPreset == WorldPreset::Shore) scene.camera = WorldScene::kShoreCamera;
         scene.SetDriving(options.worldPreset == WorldPreset::Drive);
         scene.SetWalking(options.worldPreset == WorldPreset::Walk);
         if (scene.materials) {
@@ -356,6 +359,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Water) {
         title = "TinyWorld ch14 - Lake, Stream and Shore";
         ready = "Chapter 14 opaque scene depth and water pipeline ready";
+    } else if (options.chapter == Chapter::Coast) {
+        title = "TinyWorld ch15 - Estuary and Coast";
+        ready = "Chapter 15 coastal terrain, ocean waves and shore route ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");

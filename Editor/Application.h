@@ -7,7 +7,7 @@
 
 namespace tinyworld {
 
-enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water };
+enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water, Coast };
 
 //————————————————————————————————————————————————————————————————————————————————
 // 命令行选择演示内容、输出路径和验证方式。

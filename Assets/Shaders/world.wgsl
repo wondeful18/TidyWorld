@@ -11,6 +11,7 @@ struct DrawUniform {
     shadowControls: vec4<f32>,    // 阴影开关、PCF 开关、深度偏移、保留槽
     cameraAndReflection: vec4<f32>, // xyz 为相机世界位置，w 为车身反射开关
     material: vec4<f32>,            // 类别与对应参数，地形的 w 为世界边长
+    coast: vec4<f32>,               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawUniform;
@@ -238,6 +239,24 @@ fn surfaceWeights(p: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 沿岸低地按坡度混合沙与岩，离开岸坡后沿用第八章的自动权重。
+//————————————————————————————————————————————————————————————————————————————————
+fn terrainWeights(p: vec3<f32>, normal: vec3<f32>) -> vec4<f32> {
+    let base = vec4<f32>(surfaceWeights(p, normal), 0.0);
+    if (draw.coast.x < 0.5) {
+        return base;
+    }
+    let coastalX = smoothstep(draw.coast.z, draw.coast.w - 3.0, p.x);
+    let relativeHeight = p.y - draw.coast.y;
+    let bank = (1.0 - smoothstep(0.32, 2.2, relativeHeight)) * coastalX;
+    let slope = 1.0 - clamp(normal.y, 0.0, 1.0);
+    let rock = smoothstep(0.025, 0.22, slope);
+    let beach = vec4<f32>(0.03, 0.10, 0.02, 0.85);
+    let bluff = vec4<f32>(0.02, 0.06, 0.90, 0.02);
+    return mix(base, mix(beach, bluff, rock), bank);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 金属度分配漫反射与镜面颜色，GGX 用粗糙度控制高光分布。
 //————————————————————————————————————————————————————————————————————————————————
 fn shadePbr(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32) -> vec3<f32> {
@@ -291,7 +310,7 @@ fn shadeMaterials(input: VertexOutput) -> vec3<f32> {
     if (draw.material.x > 1.5) {
         return shadePbr(input, input.color, draw.material.y, draw.material.z);
     }
-    let automatic = vec4<f32>(surfaceWeights(input.worldPosition, normalize(input.normal)), 0.0);
+    let automatic = terrainWeights(input.worldPosition, normalize(input.normal));
     let halfTexel = 0.5 / vec2<f32>(textureDimensions(terrainSplat));
     let weightUV = clamp(input.worldPosition.xz / draw.material.w + 0.5, halfTexel, vec2<f32>(1.0) - halfTexel);
     let painted = textureSample(terrainSplat, surfaceSampler, weightUV);

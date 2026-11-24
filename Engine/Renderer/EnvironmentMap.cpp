@@ -99,7 +99,7 @@ std::uint8_t EncodeSrgb(float value) {
 //————————————————————————————————————————————————————————————————————————————————
 // 在线性空间对全景图做双线性采样。水平方向连接接缝，上下钳位到极点。
 //————————————————————————————————————————————————————————————————————————————————
-Pixel SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
+glm::vec3 SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
     static const auto values = [] {
         std::array<float, 256> linear{};
         for (std::size_t i = 0; i < linear.size(); ++i) {
@@ -121,8 +121,7 @@ Pixel SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
     };
     const auto north = glm::mix(read(x0, y0), read(x0 + 1, y0), tx);
     const auto south = glm::mix(read(x0, y0 + 1), read(x0 + 1, y0 + 1), tx);
-    const auto rgb = glm::mix(north, south, ty);
-    return {EncodeSrgb(rgb.r), EncodeSrgb(rgb.g), EncodeSrgb(rgb.b), 255};
+    return glm::mix(north, south, ty);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -164,7 +163,9 @@ void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const P
                 const float u = 2.0f * (x + 0.5f) / size.width - 1.0f;
                 const float v = 2.0f * (y + 0.5f) / size.height - 1.0f;
                 const auto direction = CubeDirection(face, u, v);
-                pixels[static_cast<std::size_t>(y) * size.width + x] = SamplePanorama(panorama, PanoramaUv(direction));
+                const auto rgb = SamplePanorama(panorama, PanoramaUv(direction));
+                pixels[static_cast<std::size_t>(y) * size.width + x] =
+                    {EncodeSrgb(rgb.r), EncodeSrgb(rgb.g), EncodeSrgb(rgb.b), 255};
             }
         }
         UploadLayer(queue, texture, size, face, pixels.data());
@@ -178,6 +179,14 @@ void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const P
 //————————————————————————————————————————————————————————————————————————————————
 EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& panoramaPath) {
     const auto panorama = LoadPanorama(panoramaPath);
+    for (std::size_t i = 0; i < mHorizon.size(); ++i) {
+        const float u = static_cast<float>(i) / mHorizon.size();
+        // 取地平线上方一条窄带，减少照片里地面颜色混进远海。
+        const auto average = (SamplePanorama(panorama, {u, 0.35f}) +
+                              SamplePanorama(panorama, {u, 0.38f}) +
+                              SamplePanorama(panorama, {u, 0.41f})) / 3.0f;
+        mHorizon[i] = glm::mix(glm::vec3{0.44f, 0.57f, 0.64f}, average, 0.55f);
+    }
     constexpr WGPUExtent3D cubeSize{kFaceSize, kFaceSize, 6};
     const WGPUExtent3D panoSize{static_cast<std::uint32_t>(panorama.width),
                                static_cast<std::uint32_t>(panorama.height), 1};
@@ -250,6 +259,16 @@ EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& 
     if (!mBinding) {
         throw std::runtime_error("Cannot bind environment textures");
     }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 查观察方向对应的经度，并在周期表中平滑过渡，避免环绕接缝时跳色。
+//————————————————————————————————————————————————————————————————————————————————
+glm::vec3 EnvironmentMap::HorizonColor(glm::vec3 direction) const {
+    const float u = glm::fract(PanoramaUv(direction).x);
+    const float sample = u * mHorizon.size();
+    const auto index = static_cast<std::size_t>(sample) % mHorizon.size();
+    return glm::mix(mHorizon[index], mHorizon[(index + 1) % mHorizon.size()], glm::fract(sample));
 }
 
 }  // namespace tinyworld

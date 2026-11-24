@@ -85,6 +85,9 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     case WorldPreset::Walk:
         SetWalking(true);
         break;
+    case WorldPreset::Shore:
+        camera = kShoreCamera;
+        break;
     case WorldPreset::Materials:
         if (materials) {
             materials->spheres = true;

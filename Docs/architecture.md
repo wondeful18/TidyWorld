@@ -33,3 +33,7 @@
 `GltfAsset` 将静态 glTF 的节点变换烘入网格，按 primitive 保留 UV 与材质引用。`WorldRenderer` 为资产原型上传网格与材质，为场景实例保留各自的 uniform。JSON 保存相对路径和变换，`WalkController` 用同一个桥实例查局部桥面与引道高度。 [第 13 章教程](../Chapters/ch13/README.md)
 
 `WorldRenderer` 在水可见时保留相机深度。`WaterRenderer` 在单独的通道采样该深度，用逆视图投影重建水下落点，再把半透明水面叠加到已有的颜色。环境 Cubemap 与天空共享。 [第 14 章教程](../Chapters/ch14/README.md)
+
+## 第 15 章扩展
+
+海岸场景继续共享高度样点、路网和桥面查询。东侧岸坡由高度和法线决定沙与岩的自动权重，近岸水带与外海网格共边。海浪扰动海面法线，天空与远海共享同一份低空色。 [第 15 章教程](../Chapters/ch15/README.md)

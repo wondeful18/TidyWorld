@@ -6,6 +6,8 @@
 #include <array>
 #include <filesystem>
 
+#include <glm/vec4.hpp>
+
 namespace tinyworld {
 
 class WebGpuContext;
@@ -26,7 +28,7 @@ public:
     // 在已画完不透明物体的通道中输出选中的天空网格。
     //————————————————————————————————————————————————————————————————————————————————
     void Draw(WGPURenderPassEncoder pass, const glm::mat4& projection,
-              const glm::mat4& view, SkyMode mode) const;
+              const glm::mat4& view, SkyMode mode, glm::vec4 horizon) const;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 借用资源，以便车身和背景采样同一环境 Cubemap。

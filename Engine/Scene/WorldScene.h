@@ -16,7 +16,7 @@
 
 namespace tinyworld {
 
-enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials };  // 布局和游览预设
+enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials, Shore };  // 布局和游览预设
 enum class MaterialView { Lit, Weights, Roughness, VertexColor };  // 地表材质的诊断通道
 enum class SkyMode { Cubemap, Panorama };  // 第四章的两种天空投影
 
@@ -75,6 +75,7 @@ struct MaterialPreview {
 // 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
+    static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
     static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
     static constexpr std::size_t kCarIndex = 3;  // 小车排在三件常驻物体后面
     static constexpr std::size_t kObjectCount = kCarIndex + 1;  // 包含小车的最大物体数

@@ -23,14 +23,14 @@ public:
     // 创建水面顶点、颜色混合管线和相机常量资源。
     //————————————————————————————————————————————————————————————————————————————————
     WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const EnvironmentMap& environment,
-                  const std::filesystem::path& shaderPath);
+                  const std::filesystem::path& shaderPath, bool coast);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 从不透明深度重建水下地形，再在已有颜色附件上叠画水面。
     // depthView 变化时重建采样绑定。通道不再把该视图当作可写附件。
     //————————————————————————————————————————————————————————————————————————————————
     void Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
-                const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings);
+                const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings, glm::vec3 horizon);
 
 private:
     WebGpuContext& mGpu;                    // 借用设备与上传队列

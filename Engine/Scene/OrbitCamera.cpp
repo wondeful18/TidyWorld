@@ -30,9 +30,9 @@ glm::mat4 OrbitCamera::View() const {
 //————————————————————————————————————————————————————————————————————————————————
 // 为场景和 ImGuizmo 提供等价的像素投影，二者只采用不同的裁剪深度约定。
 //————————————————————————————————————————————————————————————————————————————————
-glm::mat4 OrbitCamera::Projection(float aspect, bool zeroToOne) const {
+glm::mat4 OrbitCamera::Projection(float aspect, bool zeroToOne, float minimumFar) const {
     const float fov = glm::radians(43.0f);
-    const float farPlane = std::max(80.0f, distance + 44.0f);
+    const float farPlane = std::max(minimumFar, distance + 44.0f);
     return zeroToOne ? glm::perspectiveRH_ZO(fov, aspect, 0.1f, farPlane)
                      : glm::perspectiveRH_NO(fov, aspect, 0.1f, farPlane);
 }

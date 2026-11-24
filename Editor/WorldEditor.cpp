@@ -112,7 +112,8 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
-            ? std::u8string{mScene.water ? u8"valley-ch14.json" : mScene.canUseGltfProps ? u8"village-ch13.json"
+            ? std::u8string{mScene.water && mScene.water->coast ? u8"coast-ch15.json"
+                : mScene.water ? u8"valley-ch14.json" : mScene.canUseGltfProps ? u8"village-ch13.json"
                 : mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
                                                 ? u8"valley-ch12.json" : u8"valley-ch11.json")
                 : mScene.canPlaceProps ? u8"valley-ch10.json" : mScene.road ? u8"valley-ch09.json"
@@ -399,10 +400,13 @@ void WorldEditor::DrawInspector() {
         return;
     }
     if (mScene.water && mSelected == kWaterPanel && !mSculptEnabled) {
-        ImGui::SeparatorText("Lake and stream");
+        ImGui::SeparatorText(mScene.water->coast ? "Estuary and coast" : "Lake and stream");
         int mode = static_cast<int>(mScene.water->view);
         if (ImGui::Combo("View", &mode, "Lit\0Depth (0–2 m)\0No reflection\0Off\0")) {
             mScene.water->view = static_cast<WaterView>(mode);
+        }
+        if (mScene.water->coast && !mScene.IsWalking() && ImGui::Button("Shore view")) {
+            mScene.camera = WorldScene::kShoreCamera;
         }
         return;
     }

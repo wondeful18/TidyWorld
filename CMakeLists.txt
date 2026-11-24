@@ -180,6 +180,7 @@ list(APPEND deployed_assets "${panorama_output}")
 set(sample_assets
     scenes/ch07/valley.json
     scenes/ch13/village.json
+    scenes/ch15/coast.json
     models/ch13/house.glb models/ch13/fence.glb models/ch13/bridge.glb
     materials/ch08/grass-color.png materials/ch08/grass-rough.png
     materials/ch08/gravel-color.png materials/ch08/gravel-rough.png
@@ -236,14 +237,18 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(TinyWorldVillageChecks Tests/VillageChecks.cpp)
-    target_link_libraries(TinyWorldVillageChecks PRIVATE TinyWorldEngine)
-    target_compile_options(TinyWorldVillageChecks PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
-    add_dependencies(TinyWorldVillageChecks TinyWorldAssets TinyWorldRuntime)
-    if(APPLE)
-        set_target_properties(TinyWorldVillageChecks PROPERTIES
-            BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
-    endif()
+    foreach(check Village Coast)
+        set(check_target TinyWorld${check}Checks)
+        add_executable(${check_target} Tests/${check}Checks.cpp)
+        target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
+        target_compile_options(${check_target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+        add_dependencies(${check_target} TinyWorldAssets TinyWorldRuntime)
+        if(APPLE)
+            set_target_properties(${check_target} PROPERTIES
+                BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
+        endif()
+    endforeach()
     add_test(NAME VillageChecks
         COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME CoastChecks COMMAND TinyWorldCoastChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 endif()

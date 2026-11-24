@@ -5,7 +5,8 @@ struct WaterUniform {
     viewProjection: mat4x4<f32>,         // 绘制平面使用的相机投影
     inverseViewProjection: mat4x4<f32>,  // 从采样深度重建世界位置
     cameraAndTime: vec4<f32>,            // 观察位置与流动弧度相位
-    controls: vec4<f32>,                 // 深度观察、反射开关与对齐填充
+    controls: vec4<f32>,                 // 深度观察、反射开关、海岸开关与填充
+    horizon: vec4<f32>,                  // 与天空共用的远海线性颜色
 }
 
 @group(0) @binding(0) var<uniform> water: WaterUniform;
@@ -33,6 +34,8 @@ fn vsWater(@location(0) position: vec3<f32>) -> WaterVertex {
 // 用同像素的不透明深度遮挡水，反投影后用世界高度差衰减颜色。
 //————————————————————————————————————————————————————————————————————————————————
 fn shadeWater(input: WaterVertex) -> vec4<f32> {
+    // 必须在遮挡丢弃片元前取导数，否则同一像素组中可能缺少邻居。
+    let footprint = fwidth(input.world.xz);
     let dimensions = textureDimensions(opaqueDepth);
     let pixel = min(vec2<i32>(input.position.xy), vec2<i32>(dimensions) - vec2<i32>(1));
     let sceneDepth = textureLoad(opaqueDepth, pixel, 0);
@@ -58,20 +61,46 @@ fn shadeWater(input: WaterVertex) -> vec4<f32> {
     let longWave = mix(sin(along - 19.0 * phase), sin(along - 4.0 * phase), lake);
     let cross = input.world.z * 6.8 + input.world.x * 0.83 + 0.5 * longWave;
     let crossWave = mix(cos(cross - 4.0 * phase), cos(cross - phase), lake);
-    let normal = normalize(vec3<f32>(0.055 * longWave, 1.0, 0.047 * crossWave));
+    var slopes = vec2<f32>(0.055 * longWave, 0.047 * crossWave);
+    var sea = 0.0;
+    var coastCrest = 0.0;
+    if (water.controls.z > 0.5) {
+        // 两个相位随时间加大，等相位线向 -X 移动，朝岸推进。
+        let offshore = smoothstep(15.0, 27.0, input.world.x);
+        let pastShore = smoothstep(24.0, 27.0, abs(input.world.z));
+        sea = max(offshore, pastShore);
+        let swell = input.world.x * 2.15 + input.world.z * 0.33 + 9.0 * phase;
+        let chop = input.world.x * 3.6 - input.world.z * 2.55 + 13.0 * phase;
+        let seaSlopes = vec2<f32>(0.085 * sin(swell) + 0.032 * cos(chop),
+                                  0.016 * sin(swell) - 0.038 * cos(chop));
+        let waveDetail = 1.0 - smoothstep(0.3, 1.45, max(footprint.x, footprint.y));
+        slopes = mix(slopes, seaSlopes * waveDetail, sea);
+        coastCrest = 0.5 + 0.5 * cos(swell);
+    }
+    let normal = normalize(vec3<f32>(slopes.x, 1.0, slopes.y));
     let toEye = normalize(water.cameraAndTime.xyz - input.world);
     let reflectDir = reflect(-toEye, normal);
     let reflected = textureSampleLevel(environmentCube, environmentSampler, reflectDir, 0.0).rgb;
     let fresnel = 0.025 + 0.65 * pow(1.0 - clamp(dot(toEye, normal), 0.0, 1.0), 3.7);
-    let attenuation = 1.0 - exp(-depthM * 1.7);
+    let absorption = mix(1.7, 2.8, sea);
+    let attenuation = 1.0 - exp(-depthM * absorption);
     let shallow = vec3<f32>(0.11, 0.49, 0.42);
-    let deep = vec3<f32>(0.017, 0.16, 0.21);
+    let deep = mix(vec3<f32>(0.017, 0.16, 0.21), vec3<f32>(0.012, 0.105, 0.19), sea);
     var color = mix(mix(shallow, deep, attenuation), reflected, fresnel * water.controls.y);
     let foamWave = 2.0 * cross + 1.3 * longWave;
-    let ripple = 0.5 + 0.5 * mix(sin(foamWave - 8.0 * phase), sin(foamWave - 2.0 * phase), lake);
-    let foam = (1.0 - smoothstep(0.035, 0.18, depthM)) * smoothstep(0.50, 0.92, ripple);
+    let creekRipple = 0.5 + 0.5 * mix(sin(foamWave - 8.0 * phase), sin(foamWave - 2.0 * phase), lake);
+    let ripple = mix(creekRipple, coastCrest * 0.84 + 0.16 * creekRipple, sea);
+    let foamLimit = mix(0.18, 0.32, sea);
+    let foam = (1.0 - smoothstep(0.035, foamLimit, depthM)) * smoothstep(0.50, 0.92, ripple);
     color = mix(color, vec3<f32>(0.72, 0.88, 0.87), foam * 0.80);
-    let alpha = clamp(0.30 + 0.62 * attenuation + 0.55 * foam + fresnel * water.controls.y, 0.0, 1.0);
+    let inlandAlpha = clamp(0.30 + 0.62 * attenuation + 0.55 * foam + fresnel * water.controls.y, 0.0, 1.0);
+    let alpha = mix(inlandAlpha, 1.0, sea * smoothstep(0.95, 2.3, depthM));
+    if (water.controls.z > 0.5) {
+        // 远海逐渐衔接同一全景图的低空色，避免远裁剪面出现硬边。
+        let distanceToEye = distance(water.cameraAndTime.xyz, input.world);
+        let horizonFade = sea * smoothstep(37.0, 123.0, distanceToEye);
+        color = mix(color, water.horizon.rgb, horizonFade);
+    }
     return vec4<f32>(color, alpha);
 }
 

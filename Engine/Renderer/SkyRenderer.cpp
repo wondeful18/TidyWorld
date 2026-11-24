@@ -21,9 +21,10 @@ namespace {
 struct SkyUniform {
     glm::mat4 rotationProjection;  // 去掉相机平移后的视图投影
     glm::vec4 options;             // x 为天空球开关，其余保留
+    glm::vec4 horizon;             // 海岸天际线的线性 RGB，w 为开关
 };
 
-static_assert(sizeof(SkyUniform) == 80);
+static_assert(sizeof(SkyUniform) == 96);
 static_assert(sizeof(glm::vec3) == 3 * sizeof(float));
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -193,11 +194,11 @@ SkyRenderer::SkyRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
 // 保留相机旋转，使天空随视线转向，平移时始终以相机为中心。
 //————————————————————————————————————————————————————————————————————————————————
 void SkyRenderer::Draw(WGPURenderPassEncoder pass, const glm::mat4& projection,
-                       const glm::mat4& view, SkyMode mode) const {
+                       const glm::mat4& view, SkyMode mode, glm::vec4 horizon) const {
     const bool panorama = mode == SkyMode::Panorama;
     const std::size_t index = panorama ? 1 : 0;
     const SkyUniform constants{projection * glm::mat4(glm::mat3(view)),
-                               glm::vec4{panorama ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f}};
+                               glm::vec4{panorama ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f}, horizon};
     wgpuQueueWriteBuffer(mGpu.Queue(), mUniform.get(), 0, &constants, sizeof(constants));
     wgpuRenderPassEncoderSetPipeline(pass, mPipeline.get());
     wgpuRenderPassEncoderSetBindGroup(pass, 0, mViewBinding.get(), 0, nullptr);
