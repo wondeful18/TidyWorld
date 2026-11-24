@@ -36,6 +36,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     auto placedProps = std::move(props);
     const auto vegetationSettings = vegetation;
     const auto waterSettings = water;
+    const auto atmosphereSettings = atmosphere;
     *this = WorldScene{};
     // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
     shadows = shadowSettings;
@@ -53,6 +54,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     props = std::move(placedProps);
     vegetation = vegetationSettings;
     water = waterSettings;
+    atmosphere = atmosphereSettings;
     if (materials) {
         materials->spheres = false;
     }

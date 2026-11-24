@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Scene/AtmosphereSettings.h"
 #include "Engine/Scene/OrbitCamera.h"
 #include "Engine/Scene/PlacedProp.h"
 #include "Engine/Scene/RoamingCar.h"
@@ -102,7 +103,8 @@ struct WorldScene {
     std::vector<PlacedProp> props;  // 保存的手摆资产实例
     bool canUseGltfProps{};  // 第十三章开启 glTF 原型与桥面查询
     std::optional<VegetationSettings> vegetation;  // 由样地或规则生成的植被参数
-    std::optional<WaterSettings> water;  // 第十四章水面调试及运行时间
+    std::optional<WaterSettings> water;  // 水面调试及运行时间
+    std::optional<AtmosphereSettings> atmosphere;  // 第十六章的雾和阴影距离预览
 
     //————————————————————————————————————————————————————————————————————————————————
     // 借用可选的高度场。只在本次地面查询或网格生成期间使用。

@@ -1,6 +1,7 @@
 #include "Engine/Renderer/WorldRenderer.h"
 
 #include "Engine/Renderer/Color.h"
+#include "Engine/Renderer/FrameAtmosphere.h"
 #include "Engine/Renderer/RenderPass.h"
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
@@ -55,10 +56,11 @@ struct DrawUniform {
     glm::vec4 cameraAndReflection; // xyz 为世界相机位置，w 为车身反射开关
     glm::vec4 material;            // 材质类别和对应的参数
     glm::vec4 coast;               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
+    FrameAtmosphere air;           // 物体、植被与水面共用的距离参数
 };
 
 static_assert(offsetof(DrawUniform, lightViewProjection) == 224);
-static_assert(sizeof(DrawUniform) == 352);
+static_assert(sizeof(DrawUniform) == 384);
 
 //————————————————————————————————————————————————————————————————————————————————
 // 显式定义物体布局，使太阳深度和颜色管线可共用每个物体的绑定。
@@ -197,7 +199,8 @@ BufferHandle MakeBuffer(WGPUDevice device, WGPUBufferUsage usage, std::uint64_t 
 WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
                              const WorldScene& scene, const std::filesystem::path& root)
     : mGpu(gpu) {
-    const auto shader = LoadWgslModule(gpu, root / "shaders" / "world.wgsl");
+    const auto shaders = root / "shaders";
+    const auto shader = LoadWgslModule(gpu, shaders / "world.wgsl", shaders / "fog.wgsl");
     mObjectLayout = BuildObjectLayout(gpu);
     const auto layout = mObjectLayout.get();
     if (scene.shadows || scene.environment || scene.vegetation) {
@@ -457,6 +460,13 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const glm::vec4 horizon = hasCoast && mSky
         ? glm::vec4(mSky->Environment().HorizonColor(glm::normalize(camera.target - eye)), 1.0f)
         : glm::vec4{0.0f};
+    FrameAtmosphere air;
+    if (scene.atmosphere) {
+        const auto& settings = *scene.atmosphere;
+        air.colorDensity = {glm::vec3(horizon), settings.fogEnabled ? settings.fogDensity : 0.0f};
+        air.distances = {settings.fogStart, settings.shadowDistance * AtmosphereSettings::kShadowFadeRatio,
+                         settings.shadowDistance, 0.0f};
+    }
     const bool reflectCar = scene.environment && scene.environment->carReflection;
     const glm::vec4 cameraAndReflection(eye, reflectCar ? 1.0f : 0.0f);
     const auto towardSun = scene.sun.TowardLight();
@@ -485,7 +495,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const auto uploadUniform = [&](const Drawable& draw, const glm::mat4& model, const glm::vec4& shadows,
                                    const glm::vec4& material = glm::vec4{0.0f}) {
         const DrawUniform uniforms{vp, model, glm::transpose(glm::inverse(model)), direction, sun,
-                                   lightViewProjection, shadows, cameraAndReflection, material, coast};
+                                   lightViewProjection, shadows, cameraAndReflection, material, coast, air};
         wgpuQueueWriteBuffer(mGpu.Queue(), draw.uniform.get(), 0, &uniforms, sizeof(uniforms));
     };
     for (std::size_t i = scene.terrain ? 1 : 0; i < visibleCount; ++i) {
@@ -591,7 +601,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     }
     wgpuRenderPassEncoderEnd(pass.get());
     if (showWater) {
-        mWater->Encode(encoder, target, mDepthView.get(), vp, eye, *scene.water, glm::vec3(horizon));
+        mWater->Encode(encoder, target, mDepthView.get(), vp, eye, *scene.water, glm::vec3(horizon), air);
     }
 }
 

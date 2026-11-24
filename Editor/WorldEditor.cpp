@@ -108,7 +108,7 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
@@ -242,6 +242,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
         SelectForEditing(kWaterPanel);
+    }
+    if (mScene.atmosphere && ImGui::Selectable("Atmosphere", mSelected == kAtmospherePanel)) {
+        SelectForEditing(kAtmospherePanel);
     }
     if (mScene.canPlaceProps) {
         if (ImGui::Selectable("Place objects", mSelected == kPropsPanel)) {
@@ -397,6 +400,21 @@ void WorldEditor::DrawInspector() {
         } else if (materials->view == MaterialView::Weights) {
             ImGui::TextWrapped("Grass (green), gravel (red), rock (blue), sand (ochre).");
         }
+        return;
+    }
+    if (auto& air = mScene.atmosphere; air && mSelected == kAtmospherePanel && !mSculptEnabled) {
+        ImGui::Checkbox("Distance fog", &air->fogEnabled);
+        ImGui::BeginDisabled(!air->fogEnabled);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.50f);
+        ImGui::SliderFloat("Fog start (m)", &air->fogStart, 0.0f, 60.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.50f);
+        ImGui::SliderFloat("Density (1/m)", &air->fogDensity, 0.0f, 0.12f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::EndDisabled();
+        ImGui::SeparatorText("Sun shadow");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.50f);
+        ImGui::SliderFloat("Distance (m)", &air->shadowDistance, AtmosphereSettings::kMinShadowDistance,
+                           AtmosphereSettings::kMaxShadowDistance, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::Text("Fade begins at %.1f m", air->shadowDistance * AtmosphereSettings::kShadowFadeRatio);
         return;
     }
     if (mScene.water && mSelected == kWaterPanel && !mSculptEnabled) {

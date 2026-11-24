@@ -33,6 +33,7 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/Color.h
     Engine/Renderer/EnvironmentMap.cpp
     Engine/Renderer/EnvironmentMap.h
+    Engine/Renderer/FrameAtmosphere.h
     Engine/Renderer/GltfMaterials.cpp
     Engine/Renderer/GltfMaterials.h
     Engine/Renderer/RenderPass.cpp
@@ -57,6 +58,7 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/WorldRenderer.cpp
     Engine/Renderer/WorldRenderer.h
     Engine/Renderer/WorldVertex.h
+    Engine/Scene/AtmosphereSettings.h
     Engine/Scene/GltfAsset.cpp
     Engine/Scene/GltfAsset.h
     Engine/Scene/OrbitCamera.cpp
@@ -122,6 +124,7 @@ add_executable(TinyWorld
     Assets/Shaders/sky.wgsl
     Assets/Shaders/world.wgsl
     Assets/Shaders/water.wgsl
+    Assets/Shaders/fog.wgsl
 )
 target_link_libraries(TinyWorld PRIVATE TinyWorldEngine tinyworld_imguizmo)
 
@@ -152,7 +155,7 @@ foreach(target TinyWorldEngine TinyWorld TinyWorldMeshPacker)
     endif()
 endforeach()
 
-foreach(shader triangle world sky water)
+foreach(shader triangle world sky water fog)
     set(shader_source "${PROJECT_SOURCE_DIR}/Assets/Shaders/${shader}.wgsl")
     set(shader_output "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${shader}.wgsl")
     add_custom_command(OUTPUT "${shader_output}"

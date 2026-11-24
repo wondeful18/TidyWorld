@@ -83,6 +83,11 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         scene.water->view = options.waterView.value_or(WaterView::Lit);
         scene.water->seconds = options.waterTime.value_or(0.0f);
     }
+    if (options.chapter >= Chapter::Atmosphere) {
+        scene.atmosphere.emplace();
+        if (options.fogEnabled) scene.atmosphere->fogEnabled = *options.fogEnabled;
+        if (options.shadowDistance) scene.atmosphere->shadowDistance = *options.shadowDistance;
+    }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
@@ -362,6 +367,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Coast) {
         title = "TinyWorld ch15 - Estuary and Coast";
         ready = "Chapter 15 coastal terrain, ocean waves and shore route ready";
+    } else if (options.chapter == Chapter::Atmosphere) {
+        title = "TinyWorld ch16 - Sun, Shadows and Distance Fog";
+        ready = "Chapter 16 shared sky color, shadow distance and linear fog ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");

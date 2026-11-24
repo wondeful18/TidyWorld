@@ -12,6 +12,7 @@ struct DrawUniform {
     cameraAndReflection: vec4<f32>, // xyz 为相机世界位置，w 为车身反射开关
     material: vec4<f32>,            // 类别与对应参数，地形的 w 为世界边长
     coast: vec4<f32>,               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
+    air: FrameAtmosphere,           // 与水面共用的雾色、衰减和世界尺度
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawUniform;
@@ -116,6 +117,15 @@ fn sunVisibility(input: VertexOutput) -> f32 {
         return 1.0;
     }
 
+    // 在相机接收距离的末段把阴影淡向全亮，范围外无需读取深度图。
+    var fade = 0.0;
+    if (draw.air.distances.z > 0.0) {
+        let eyeDistance = distance(draw.cameraAndReflection.xyz, input.worldPosition);
+        fade = smoothstep(draw.air.distances.y, draw.air.distances.z, eyeDistance);
+        if (fade >= 1.0) {
+            return 1.0;
+        }
+    }
     let ndc = input.lightClip.xyz / input.lightClip.w;
     // WebGPU 投影的 Z 已在 0–1，纹理 V 从上到下，需翻转 Y。
     let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
@@ -127,7 +137,8 @@ fn sunVisibility(input: VertexOutput) -> f32 {
     // 倾斜面上相邻采样点的深度差较大，因此增加接收深度偏移。
     let reference = ndc.z - draw.shadowControls.z * (1.0 + 2.0 * (1.0 - facingSun));
     if (draw.shadowControls.y < 0.5) {
-        return textureSampleCompareLevel(sunDepth, sunDepthSampler, uv, reference);
+        let sample = textureSampleCompareLevel(sunDepth, sunDepthSampler, uv, reference);
+        return mix(sample, 1.0, fade);
     }
 
     let texel = 1.0 / vec2<f32>(textureDimensions(sunDepth));
@@ -138,7 +149,7 @@ fn sunVisibility(input: VertexOutput) -> f32 {
             lit += textureSampleCompareLevel(sunDepth, sunDepthSampler, uv + offset, reference);
         }
     }
-    return lit / 9.0;
+    return mix(lit / 9.0, 1.0, fade);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -332,11 +343,19 @@ fn shadeMaterials(input: VertexOutput) -> vec3<f32> {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 延续附件各自的显示编码约定，着色全程用线性数值。
+// 将同一帧的线性雾色用于地表、道路、房屋和植被。各入口随后才编码显示值。
+//————————————————————————————————————————————————————————————————————————————————
+fn foggedWorld(linear: vec3<f32>, worldPosition: vec3<f32>) -> vec3<f32> {
+    let eyeDistance = distance(draw.cameraAndReflection.xyz, worldPosition);
+    return applyDistanceFog(linear, eyeDistance, draw.air);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// sRGB 附件接收已经完成光照和雾计算的线性颜色。
 //————————————————————————————————————————————————————————————————————————————————
 @fragment
 fn fsMaterialsLinear(input: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(shadeMaterials(input), 1.0);
+    return vec4<f32>(foggedWorld(shadeMaterials(input), input.worldPosition), 1.0);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -344,7 +363,7 @@ fn fsMaterialsLinear(input: VertexOutput) -> @location(0) vec4<f32> {
 //————————————————————————————————————————————————————————————————————————————————
 @fragment
 fn fsMaterialsDisplay(input: VertexOutput) -> @location(0) vec4<f32> {
-    return encodeDisplay(shadeMaterials(input));
+    return encodeDisplay(foggedWorld(shadeMaterials(input), input.worldPosition));
 }
 
 struct VegetationOutput {
@@ -352,7 +371,8 @@ struct VegetationOutput {
     @location(0) normal: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(2) lightClip: vec4<f32>,
-    @location(3) cardUv: vec2<f32>,
+    @location(3) cardUv: vec2<f32>,     // 卡片局部坐标，用于草叶覆盖测试
+    @location(4) worldPosition: vec3<f32>, // 植被顶点的世界坐标，用于雾和接收距离
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -368,7 +388,7 @@ fn vsVegetation(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>
                 @location(4) positionScale: vec4<f32>, @location(5) facingShade: vec4<f32>) -> VegetationOutput {
     let world = vec4<f32>(positionScale.xyz + vegetationRotate(position, facingShade.xy) * positionScale.w, 1.0);
     return VegetationOutput(draw.viewProjection * world, vegetationRotate(normal, facingShade.xy),
-                            color * facingShade.z, draw.lightViewProjection * world, uv);
+                            color * facingShade.z, draw.lightViewProjection * world, uv, world.xyz);
 }
 
 @vertex
@@ -403,7 +423,8 @@ fn shadeVegetation(in: VegetationOutput) -> vec3<f32> {
     light.normal = in.normal;
     light.color = in.color;
     light.lightClip = in.lightClip;
-    return shade(light, sunVisibility(light));
+    light.worldPosition = in.worldPosition;
+    return foggedWorld(shade(light, sunVisibility(light)), in.worldPosition);
 }
 
 @fragment
@@ -444,7 +465,7 @@ fn shadeGltf(input: VertexOutput) -> vec3<f32> {
 //————————————————————————————————————————————————————————————————————————————————
 @fragment
 fn fsGltfLinear(input: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(shadeGltf(input), 1.0);
+    return vec4<f32>(foggedWorld(shadeGltf(input), input.worldPosition), 1.0);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -452,5 +473,5 @@ fn fsGltfLinear(input: VertexOutput) -> @location(0) vec4<f32> {
 //————————————————————————————————————————————————————————————————————————————————
 @fragment
 fn fsGltfDisplay(input: VertexOutput) -> @location(0) vec4<f32> {
-    return encodeDisplay(shadeGltf(input));
+    return encodeDisplay(foggedWorld(shadeGltf(input), input.worldPosition));
 }

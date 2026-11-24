@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Platform/Window.h"
+#include "Engine/Renderer/FrameAtmosphere.h"
 #include "Engine/Renderer/WgpuHandle.h"
 #include "Engine/Scene/WaterSettings.h"
 
@@ -30,7 +31,8 @@ public:
     // depthView 变化时重建采样绑定。通道不再把该视图当作可写附件。
     //————————————————————————————————————————————————————————————————————————————————
     void Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
-                const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings, glm::vec3 horizon);
+                const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
+                glm::vec3 horizon, const FrameAtmosphere& air);
 
 private:
     WebGpuContext& mGpu;                    // 借用设备与上传队列

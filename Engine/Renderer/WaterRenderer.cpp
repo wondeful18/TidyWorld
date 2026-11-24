@@ -28,9 +28,10 @@ struct WaterUniform {
     glm::vec4 cameraAndTime;      // 相机 XYZ 与流水周期的弧度相位
     glm::vec4 controls;           // 依次为深度观察、反射开关、海岸开关和填充
     glm::vec4 horizon;            // 与天空共用的远海线性颜色，w 保留
+    FrameAtmosphere air;          // 与场景物体共用的距离雾
 };
 
-static_assert(sizeof(WaterUniform) == 176);
+static_assert(sizeof(WaterUniform) == 208);
 
 //————————————————————————————————————————————————————————————————————————————————
 // 用同一条水带从溪谷经过湖泊。海岸模式把东端逐渐扩宽到整片海面。
@@ -102,7 +103,7 @@ BufferHandle MakeWaterBuffer(WGPUDevice device, WGPUBufferUsage usage, std::size
 WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const EnvironmentMap& environment,
                              const std::filesystem::path& shaderPath, bool coast)
     : mGpu(gpu), mEnvironment(environment) {
-    const auto shader = LoadWgslModule(gpu, shaderPath);
+    const auto shader = LoadWgslModule(gpu, shaderPath, shaderPath.parent_path() / "fog.wgsl");
     std::array<WGPUBindGroupLayoutEntry, 2> entries{
         WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
     };
@@ -169,7 +170,8 @@ WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const
 // Load 保留不透明颜色。深度只作纹理绑定，窗口缩放后改用新的视图。
 //————————————————————————————————————————————————————————————————————————————————
 void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
-                           const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings, glm::vec3 horizon) {
+                           const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
+                           glm::vec3 horizon, const FrameAtmosphere& air) {
     if (depthView != mBoundDepth) {
         std::array<WGPUBindGroupEntry, 2> entries{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
         entries[0].buffer = mUniform.get();
@@ -188,7 +190,7 @@ void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, W
     const WaterUniform values{viewProjection, glm::inverse(viewProjection), glm::vec4(camera, phase),
                              {settings.view == WaterView::Depth ? 1.0f : 0.0f,
                               settings.view == WaterView::NoReflection ? 0.0f : 1.0f,
-                              settings.coast ? 1.0f : 0.0f, 0.0f}, glm::vec4(horizon, 0.0f)};
+                              settings.coast ? 1.0f : 0.0f, 0.0f}, glm::vec4(horizon, 0.0f), air};
     wgpuQueueWriteBuffer(mGpu.Queue(), mUniform.get(), 0, &values, sizeof(values));
 
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;

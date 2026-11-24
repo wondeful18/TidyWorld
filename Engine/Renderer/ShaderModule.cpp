@@ -8,11 +8,12 @@
 #include <string>
 
 namespace tinyworld {
+namespace {
 
 //————————————————————————————————————————————————————————————————————————————————
-// WGSL 字节在模块创建时读取，验证作用域负责返回解析错误。
+// 读取一份 WGSL 文件。读取失败时报告具体路径。
 //————————————————————————————————————————————————————————————————————————————————
-ShaderHandle LoadWgslModule(WebGpuContext& gpu, const std::filesystem::path& path) {
+std::string ReadWgsl(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
         throw std::runtime_error("Cannot open shader: " + path.string());
@@ -21,6 +22,18 @@ ShaderHandle LoadWgslModule(WebGpuContext& gpu, const std::filesystem::path& pat
     if (stream.bad() || code.empty()) {
         throw std::runtime_error("Cannot read shader: " + path.string());
     }
+    return code;
+}
+
+}  // namespace
+
+//————————————————————————————————————————————————————————————————————————————————
+// 将共用类型和函数放在当前 WGSL 入口之前，再统一验证一次模块。
+//————————————————————————————————————————————————————————————————————————————————
+ShaderHandle LoadWgslModule(WebGpuContext& gpu, const std::filesystem::path& path,
+                           const std::filesystem::path& preamble) {
+    std::string code = ReadWgsl(path);
+    if (!preamble.empty()) code = ReadWgsl(preamble) + '\n' + code;
     WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
     wgsl.code = {code.data(), code.size()};
     const auto label = path.filename().string();

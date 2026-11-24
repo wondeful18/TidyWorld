@@ -9,13 +9,12 @@
 namespace {
 
 //————————————————————————————————————————————————————————————————————————————————
-// 只接受完整且位于 Inspector 可调范围内的 0–1 深度偏移值。
+// 读取完整的数值并检查范围。浮点 NaN 不满足两个边界比较。
 //————————————————————————————————————————————————————————————————————————————————
-bool ParseShadowBias(std::string_view text, float& bias) {
+bool ParseFloatInRange(std::string_view text, float& value, float minimum, float maximum) {
     const auto* end = text.data() + text.size();
-    const auto result = std::from_chars(text.data(), end, bias);
-    return result.ec == std::errc{} && result.ptr == end &&
-           bias >= 0.0f && bias <= tinyworld::ShadowSettings::kMaxDepthBias;
+    const auto result = std::from_chars(text.data(), end, value);
+    return result.ec == std::errc{} && result.ptr == end && value >= minimum && value <= maximum;
 }
 
 }  // namespace
@@ -77,8 +76,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Water;
             } else if (value == "15") {
                 options.chapter = tinyworld::Chapter::Coast;
+            } else if (value == "16") {
+                options.chapter = tinyworld::Chapter::Atmosphere;
             } else {
-                std::cerr << "Choose chapter 01 through 15.\n";
+                std::cerr << "Choose chapter 01 through 16.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -108,7 +109,8 @@ int main(int argc, char** argv) {
                 shadows.enabled = false;
             } else if (argument == "--hard-shadows") {
                 shadows.pcf = false;
-            } else if (index + 1 == argc || !ParseShadowBias(argv[++index], shadows.depthBias)) {
+            } else if (index + 1 == argc || !ParseFloatInRange(argv[++index], shadows.depthBias, 0.0f,
+                                          tinyworld::ShadowSettings::kMaxDepthBias)) {
                 std::cerr << "Shadow bias must be a number between 0 and 0.01.\n";
                 return EXIT_FAILURE;
             }
@@ -155,8 +157,23 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             options.waterTime = seconds;
+        } else if (argument == "--fog" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value != "on" && value != "off") {
+                std::cerr << "Choose fog on or off.\n";
+                return EXIT_FAILURE;
+            }
+            options.fogEnabled = value == "on";
+        } else if (argument == "--shadow-distance" && index + 1 < argc) {
+            float metres{};
+            if (!ParseFloatInRange(argv[++index], metres, tinyworld::AtmosphereSettings::kMinShadowDistance,
+                                   tinyworld::AtmosphereSettings::kMaxShadowDistance)) {
+                std::cerr << "Shadow distance must be between 8 and 85 metres.\n";
+                return EXIT_FAILURE;
+            }
+            options.shadowDistance = metres;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..15] [--preset overlap|evening|drive|walk|materials|shore] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..16] [--preset overlap|evening|drive|walk|materials|shore] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -168,7 +185,8 @@ int main(int argc, char** argv) {
                          "Chapter 09+: [--export-road-mask output.pgm]\n"
                          "Chapter 11+: [--benchmark-vegetation]\n"
                          "Chapter 14+: [--water lit|depth|no-reflection|off] [--water-time seconds]\n"
-                         "Chapter 15+: [--preset shore]\n";
+                         "Chapter 15+: [--preset shore]\n"
+                         "Chapter 16: [--fog on|off] [--shadow-distance metres]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -200,6 +218,10 @@ int main(int argc, char** argv) {
     }
     if ((options.waterView || options.waterTime) && options.chapter < tinyworld::Chapter::Water) {
         std::cerr << "Water options require chapter 14.\n";
+        return EXIT_FAILURE;
+    }
+    if ((options.fogEnabled || options.shadowDistance) && options.chapter < tinyworld::Chapter::Atmosphere) {
+        std::cerr << "Fog and shadow distance options require chapter 16.\n";
         return EXIT_FAILURE;
     }
     if (options.environmentOverrides && options.chapter < tinyworld::Chapter::Sky) {

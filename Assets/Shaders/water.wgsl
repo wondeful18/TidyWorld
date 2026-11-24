@@ -7,6 +7,7 @@ struct WaterUniform {
     cameraAndTime: vec4<f32>,            // 观察位置与流动弧度相位
     controls: vec4<f32>,                 // 深度观察、反射开关、海岸开关与填充
     horizon: vec4<f32>,                  // 与天空共用的远海线性颜色
+    air: FrameAtmosphere,               // 与不透明物体共用的雾参数
 }
 
 @group(0) @binding(0) var<uniform> water: WaterUniform;
@@ -95,13 +96,13 @@ fn shadeWater(input: WaterVertex) -> vec4<f32> {
     color = mix(color, vec3<f32>(0.72, 0.88, 0.87), foam * 0.80);
     let inlandAlpha = clamp(0.30 + 0.62 * attenuation + 0.55 * foam + fresnel * water.controls.y, 0.0, 1.0);
     let alpha = mix(inlandAlpha, 1.0, sea * smoothstep(0.95, 2.3, depthM));
+    let distanceToEye = distance(water.cameraAndTime.xyz, input.world);
     if (water.controls.z > 0.5) {
         // 远海逐渐衔接同一全景图的低空色，避免远裁剪面出现硬边。
-        let distanceToEye = distance(water.cameraAndTime.xyz, input.world);
         let horizonFade = sea * smoothstep(37.0, 123.0, distanceToEye);
         color = mix(color, water.horizon.rgb, horizonFade);
     }
-    return vec4<f32>(color, alpha);
+    return vec4<f32>(applyDistanceFog(color, distanceToEye, water.air), alpha);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
