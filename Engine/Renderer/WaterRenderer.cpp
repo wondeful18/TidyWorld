@@ -1,0 +1,184 @@
+#include "Engine/Renderer/WaterRenderer.h"
+
+#include "Engine/Renderer/Color.h"
+#include "Engine/Renderer/EnvironmentMap.h"
+#include "Engine/Renderer/ShaderModule.h"
+#include "Engine/Renderer/WebGpuContext.h"
+
+#include <glm/gtc/constants.hpp>
+#include <glm/matrix.hpp>
+#include <glm/vec4.hpp>
+
+#include <array>
+#include <cmath>
+#include <stdexcept>
+#include <vector>
+
+namespace tinyworld {
+namespace {
+
+constexpr float kWaterLevel = -0.38f;
+
+//————————————————————————————————————————————————————————————————————————————————
+// 正矩阵用于绘制水面，逆矩阵用于把相机深度重建成世界坐标。
+//————————————————————————————————————————————————————————————————————————————————
+struct WaterUniform {
+    glm::mat4 viewProjection;     // 世界坐标到 WebGPU 裁剪坐标
+    glm::mat4 inverseViewProjection;  // 除以重建后的 W 即得世界坐标
+    glm::vec4 cameraAndTime;      // 相机 XYZ 与流水周期的弧度相位
+    glm::vec4 controls;           // X 为深度观察，Y 为环境反射开关
+};
+
+static_assert(sizeof(WaterUniform) == 160);
+
+//————————————————————————————————————————————————————————————————————————————————
+// 从溪谷西端向东布一条带。东侧逐渐加宽形成湖泊，水面延入岸坡。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<glm::vec3> MakeWaterMesh() {
+    const auto section = [](float x) {
+        const float offset = (x - 10.0f) / 5.9f;
+        const float spread = (x - 10.0f) / 5.8f;
+        const float center = -0.83f * std::sin(x * 0.19f) - 1.4f * std::exp(-offset * offset);
+        // 带宽比湿岸更大，由相机深度准确确定坡面在哪里盖住水。
+        const float width = 1.30f * (1.48f + 5.85f * std::exp(-spread * spread));
+        return std::array{glm::vec3{x, kWaterLevel, center - width},
+                          glm::vec3{x, kWaterLevel, center + width}};
+    };
+
+    std::vector<glm::vec3> vertices;
+    auto left = section(-24.0f);
+    for (int i = 1; i <= 96; ++i) {
+        const auto right = section(-24.0f + 0.5f * i);
+        vertices.insert(vertices.end(), {left[0], left[1], right[0], right[0], left[1], right[1]});
+        left = right;
+    }
+    return vertices;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 创建可更新的顶点或 uniform 缓冲。
+//————————————————————————————————————————————————————————————————————————————————
+BufferHandle MakeWaterBuffer(WGPUDevice device, WGPUBufferUsage usage, std::size_t bytes) {
+    WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+    descriptor.usage = usage | WGPUBufferUsage_CopyDst;
+    descriptor.size = bytes;
+    BufferHandle buffer(wgpuDeviceCreateBuffer(device, &descriptor));
+    if (!buffer) throw std::runtime_error("Cannot allocate water buffer.");
+    return buffer;
+}
+
+}  // namespace
+
+//————————————————————————————————————————————————————————————————————————————————
+// 水面不写深度。片元用同像素的不透明深度判断可见性，直接输出层叠颜色。
+//————————————————————————————————————————————————————————————————————————————————
+WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const EnvironmentMap& environment,
+                             const std::filesystem::path& shaderPath)
+    : mGpu(gpu), mEnvironment(environment) {
+    const auto shader = LoadWgslModule(gpu, shaderPath);
+    std::array<WGPUBindGroupLayoutEntry, 2> entries{
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+    };
+    entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+    entries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    entries[0].buffer.minBindingSize = sizeof(WaterUniform);
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Fragment;
+    entries[1].texture.sampleType = WGPUTextureSampleType_Depth;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    WGPUBindGroupLayoutDescriptor binding = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    binding.entries = entries.data();
+    binding.entryCount = entries.size();
+
+    WGPUVertexAttribute position = WGPU_VERTEX_ATTRIBUTE_INIT;
+    position.format = WGPUVertexFormat_Float32x3;
+    WGPUVertexBufferLayout vertices = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+    vertices.arrayStride = sizeof(glm::vec3);
+    vertices.attributeCount = 1;
+    vertices.attributes = &position;
+
+    WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
+    blend.color.srcFactor = WGPUBlendFactor_SrcAlpha;
+    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    blend.alpha.srcFactor = WGPUBlendFactor_One;
+    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
+    color.format = format;
+    color.blend = &blend;
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module = shader.get();
+    fragment.entryPoint = {IsSrgbFormat(format) ? "fsWaterLinear" : "fsWaterDisplay", WGPU_STRLEN};
+    fragment.targetCount = 1;
+    fragment.targets = &color;
+
+    wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
+    mLayout.reset(wgpuDeviceCreateBindGroupLayout(gpu.Device(), &binding));
+    const std::array layouts{mLayout.get(), environment.Layout()};
+    WGPUPipelineLayoutDescriptor layout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    layout.bindGroupLayoutCount = layouts.size();
+    layout.bindGroupLayouts = layouts.data();
+    PipelineLayoutHandle pipelineLayout(wgpuDeviceCreatePipelineLayout(gpu.Device(), &layout));
+    WGPURenderPipelineDescriptor pipeline = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    pipeline.label = {"Water depth and reflection", WGPU_STRLEN};
+    pipeline.layout = pipelineLayout.get();
+    pipeline.vertex.module = shader.get();
+    pipeline.vertex.entryPoint = {"vsWater", WGPU_STRLEN};
+    pipeline.vertex.bufferCount = 1;
+    pipeline.vertex.buffers = &vertices;
+    pipeline.fragment = &fragment;
+    mPipeline.reset(wgpuDeviceCreateRenderPipeline(gpu.Device(), &pipeline));
+    gpu.CheckValidation("water render pipeline");
+    if (!mLayout || !pipelineLayout || !mPipeline) throw std::runtime_error("Cannot create water pipeline.");
+
+    const auto mesh = MakeWaterMesh();
+    const auto bytes = mesh.size() * sizeof(glm::vec3);
+    mVertexCount = static_cast<std::uint32_t>(mesh.size());
+    mVertices = MakeWaterBuffer(gpu.Device(), WGPUBufferUsage_Vertex, bytes);
+    wgpuQueueWriteBuffer(gpu.Queue(), mVertices.get(), 0, mesh.data(), bytes);
+    mUniform = MakeWaterBuffer(gpu.Device(), WGPUBufferUsage_Uniform, sizeof(WaterUniform));
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// Load 保留不透明颜色。深度只作纹理绑定，窗口缩放后改用新的视图。
+//————————————————————————————————————————————————————————————————————————————————
+void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
+                           const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings) {
+    if (depthView != mBoundDepth) {
+        std::array<WGPUBindGroupEntry, 2> entries{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+        entries[0].buffer = mUniform.get();
+        entries[0].size = sizeof(WaterUniform);
+        entries[1].binding = 1;
+        entries[1].textureView = depthView;
+        WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        binding.layout = mLayout.get();
+        binding.entries = entries.data();
+        binding.entryCount = entries.size();
+        mBinding.reset(wgpuDeviceCreateBindGroup(mGpu.Device(), &binding));
+        if (!mBinding) throw std::runtime_error("Cannot bind opaque depth for water.");
+        mBoundDepth = depthView;
+    }
+    const float phase = settings.seconds * (glm::two_pi<float>() / WaterSettings::kLoopSeconds);
+    const WaterUniform values{viewProjection, glm::inverse(viewProjection), glm::vec4(camera, phase),
+                             {settings.view == WaterView::Depth ? 1.0f : 0.0f,
+                              settings.view == WaterView::NoReflection ? 0.0f : 1.0f, 0.0f, 0.0f}};
+    wgpuQueueWriteBuffer(mGpu.Queue(), mUniform.get(), 0, &values, sizeof(values));
+
+    WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    color.view = target;
+    color.loadOp = WGPULoadOp_Load;
+    color.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    descriptor.label = {"Water after opaque scene", WGPU_STRLEN};
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &color;
+    PassHandle pass(wgpuCommandEncoderBeginRenderPass(encoder, &descriptor));
+    if (!pass) throw std::runtime_error("Cannot begin water color pass.");
+    wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
+    wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, mBinding.get(), 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mEnvironment.Binding(), 0, nullptr);
+    wgpuRenderPassEncoderSetVertexBuffer(pass.get(), 0, mVertices.get(), 0, mVertexCount * sizeof(glm::vec3));
+    wgpuRenderPassEncoderDraw(pass.get(), mVertexCount, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass.get());
+}
+
+}  // namespace tinyworld

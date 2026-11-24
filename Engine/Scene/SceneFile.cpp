@@ -456,6 +456,7 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     }
     loaded.showChunkBorders = scene.showChunkBorders;
     loaded.materials = scene.materials;
+    loaded.water = scene.water;
     loaded.canPlaceProps = scene.canPlaceProps;
     if (loaded.vegetation && (!scene.vegetation || scene.vegetation->mode != VegetationMode::TerrainRules)) {
         throw std::runtime_error("Ecology scenes open in Chapter 12 or later.");

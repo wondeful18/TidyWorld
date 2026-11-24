@@ -7,7 +7,7 @@
 
 namespace tinyworld {
 
-enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village };
+enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water };
 
 //————————————————————————————————————————————————————————————————————————————————
 // 命令行选择演示内容、输出路径和验证方式。
@@ -25,6 +25,8 @@ struct ApplicationOptions {
     std::filesystem::path roadMaskPath;              // 第九章导出遮罩后直接退出的文件路径
     WorldPreset worldPreset{WorldPreset::Default};  // 小屋场景的初始布局和日照
     std::optional<ShadowSettings> shadowOverrides;   // 第三、四章命令行提供的阴影覆盖值
+    std::optional<float> waterTime;                 // 第十四章开始时的流水时间，单位为秒
+    std::optional<WaterView> waterView;             // 第十四章固定机位对照的显示模式
     std::optional<EnvironmentSettings> environmentOverrides; // 第四章的背景模式和反射开关
 };
 

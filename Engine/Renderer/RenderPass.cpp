@@ -10,7 +10,7 @@ namespace tinyworld {
 // Store 操作保留绘制结果，供后续采样或窗口呈现。
 //————————————————————————————————————————————————————————————————————————————————
 PassHandle BeginColorPass(WGPUCommandEncoder encoder, WGPUTextureView target,
-                          WGPUColor clearColor, const char* label, WGPUTextureView depthTarget) {
+                          WGPUColor clearColor, const char* label, WGPUTextureView depthTarget, WGPUStoreOp depthStore) {
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = target;
     color.loadOp = WGPULoadOp_Clear;
@@ -25,7 +25,7 @@ PassHandle BeginColorPass(WGPUCommandEncoder encoder, WGPUTextureView target,
     if (depthTarget) {
         depth.view = depthTarget;
         depth.depthLoadOp = WGPULoadOp_Clear;
-        depth.depthStoreOp = WGPUStoreOp_Discard;
+        depth.depthStoreOp = depthStore;
         depth.depthClearValue = 1.0f;
         descriptor.depthStencilAttachment = &depth;
     }

@@ -73,8 +73,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Ecology;
             } else if (value == "13") {
                 options.chapter = tinyworld::Chapter::Village;
+            } else if (value == "14") {
+                options.chapter = tinyworld::Chapter::Water;
             } else {
-                std::cerr << "Choose chapter 01 through 13.\n";
+                std::cerr << "Choose chapter 01 through 14.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -124,8 +126,33 @@ int main(int argc, char** argv) {
                     return EXIT_FAILURE;
                 }
             }
+        } else if (argument == "--water" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value == "lit") {
+                options.waterView = tinyworld::WaterView::Lit;
+            } else if (value == "depth") {
+                options.waterView = tinyworld::WaterView::Depth;
+            } else if (value == "no-reflection") {
+                options.waterView = tinyworld::WaterView::NoReflection;
+            } else if (value == "off") {
+                options.waterView = tinyworld::WaterView::Off;
+            } else {
+                std::cerr << "Choose water lit, depth, no-reflection or off.\n";
+                return EXIT_FAILURE;
+            }
+        } else if (argument == "--water-time" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            const auto* end = value.data() + value.size();
+            float seconds{};
+            const auto parsed = std::from_chars(value.data(), end, seconds);
+            if (parsed.ec != std::errc{} || parsed.ptr != end ||
+                !(seconds >= 0.0f && seconds < tinyworld::WaterSettings::kLoopSeconds)) {
+                std::cerr << "Water time must be in [0, 32) seconds.\n";
+                return EXIT_FAILURE;
+            }
+            options.waterTime = seconds;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..13] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..14] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -135,7 +162,8 @@ int main(int argc, char** argv) {
                          "Chapter 07+: [--scene valley.json] [--sculpt-tools]\n"
                          "Chapter 08+: [--preset materials]\n"
                          "Chapter 09+: [--export-road-mask output.pgm]\n"
-                         "Chapter 11+: [--benchmark-vegetation]\n";
+                         "Chapter 11+: [--benchmark-vegetation]\n"
+                         "Chapter 14: [--water lit|depth|no-reflection|off] [--water-time seconds]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -163,6 +191,10 @@ int main(int argc, char** argv) {
     }
     if (options.shadowOverrides && options.chapter < tinyworld::Chapter::SunShadows) {
         std::cerr << "Shadow options require chapter 03 or later.\n";
+        return EXIT_FAILURE;
+    }
+    if ((options.waterView || options.waterTime) && options.chapter < tinyworld::Chapter::Water) {
+        std::cerr << "Water options require chapter 14.\n";
         return EXIT_FAILURE;
     }
     if (options.environmentOverrides && options.chapter < tinyworld::Chapter::Sky) {

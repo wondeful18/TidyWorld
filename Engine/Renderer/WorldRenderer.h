@@ -6,6 +6,7 @@
 #include "Engine/Renderer/SunShadowMap.h"
 #include "Engine/Renderer/SurfaceMaterials.h"
 #include "Engine/Renderer/VegetationRenderer.h"
+#include "Engine/Renderer/WaterRenderer.h"
 #include "Engine/Renderer/WgpuHandle.h"
 #include "Engine/Renderer/WorldVertex.h"
 #include "Engine/Scene/RobotMesh.h"
@@ -121,6 +122,7 @@ private:
     BindGroupLayoutHandle mObjectLayout;                    // 保留动态路面上传所需的物体布局
     std::optional<SunShadowMap> mShadowMap;                // 仅由支持阴影的章节创建
     std::optional<SkyRenderer> mSky;                       // 第四章背景与共享环境纹理
+    std::optional<WaterRenderer> mWater;  // 读取当前相机深度的半透明水面
     std::optional<SurfaceMaterials> mMaterials;            // 第八章底色与粗糙度数组
     std::optional<VegetationRenderer> mVegetation;
     Drawable mVegetationUniform;

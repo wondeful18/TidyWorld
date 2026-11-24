@@ -108,11 +108,11 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
-            ? std::u8string{mScene.canUseGltfProps ? u8"village-ch13.json"
+            ? std::u8string{mScene.water ? u8"valley-ch14.json" : mScene.canUseGltfProps ? u8"village-ch13.json"
                 : mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
                                                 ? u8"valley-ch12.json" : u8"valley-ch11.json")
                 : mScene.canPlaceProps ? u8"valley-ch10.json" : mScene.road ? u8"valley-ch09.json"
@@ -238,6 +238,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.vegetation && ImGui::Selectable("Vegetation", mSelected == kVegetationPanel)) {
         SelectForEditing(kVegetationPanel);
+    }
+    if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
+        SelectForEditing(kWaterPanel);
     }
     if (mScene.canPlaceProps) {
         if (ImGui::Selectable("Place objects", mSelected == kPropsPanel)) {
@@ -392,6 +395,14 @@ void WorldEditor::DrawInspector() {
             ImGui::TextWrapped("Left to right: dielectric (0.24 / 0.62), metal (0.24 / 0.62).");
         } else if (materials->view == MaterialView::Weights) {
             ImGui::TextWrapped("Grass (green), gravel (red), rock (blue), sand (ochre).");
+        }
+        return;
+    }
+    if (mScene.water && mSelected == kWaterPanel && !mSculptEnabled) {
+        ImGui::SeparatorText("Lake and stream");
+        int mode = static_cast<int>(mScene.water->view);
+        if (ImGui::Combo("View", &mode, "Lit\0Depth (0–2 m)\0No reflection\0Off\0")) {
+            mScene.water->view = static_cast<WaterView>(mode);
         }
         return;
     }

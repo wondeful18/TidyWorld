@@ -51,7 +51,8 @@ private:
     static constexpr std::size_t kRoadPanel = WorldScene::kObjectCount + 2;      // 样条道路属性页
     static constexpr std::size_t kPropsPanel = WorldScene::kObjectCount + 3;
     static constexpr std::size_t kVegetationPanel = kPropsPanel + 1;
-    static constexpr std::size_t kFirstProp = kVegetationPanel + 1;
+    static constexpr std::size_t kWaterPanel = kVegetationPanel + 1;  // 水面观察选项
+    static constexpr std::size_t kFirstProp = kWaterPanel + 1;
     enum class GizmoMode { Move, Rotate, Scale };
     //————————————————————————————————————————————————————————————————————————————————
     // 提供场景路径和保存、重开按钮，在面板内报告结果。

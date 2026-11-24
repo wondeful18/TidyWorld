@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <optional>
 #include <stdexcept>
@@ -74,6 +75,11 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
     if (options.chapter >= Chapter::Meadow) {
         scene.vegetation.emplace();
         if (options.chapter >= Chapter::Ecology) scene.vegetation->mode = VegetationMode::TerrainRules;
+    }
+    if (options.chapter >= Chapter::Water) {
+        scene.water.emplace();
+        scene.water->view = options.waterView.value_or(WaterView::Lit);
+        scene.water->seconds = options.waterTime.value_or(0.0f);
     }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
@@ -347,6 +353,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Village) {
         title = "TinyWorld ch13 - Village Assets and Footbridge";
         ready = "Chapter 13 glTF meshes, PBR textures and bridge walking ready";
+    } else if (options.chapter == Chapter::Water) {
+        title = "TinyWorld ch14 - Lake, Stream and Shore";
+        ready = "Chapter 14 opaque scene depth and water pipeline ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
@@ -387,13 +396,17 @@ int RunApplication(const ApplicationOptions& options) {
 
         bool presented = false;
         if (framebuffer.width != 0 && framebuffer.height != 0) {
-            if (options.direct && isWorld) {
-                auto& scene = std::get<WorldDemo>(demo).scene;
+            if (auto* world = std::get_if<WorldDemo>(&demo)) {
+                auto& scene = world->scene;
                 const double seconds = frameIntervalMs / 1000.0;
-                if (scene.IsWalking()) {
+                if (scene.water) {
+                    scene.water->seconds = std::fmod(scene.water->seconds + static_cast<float>(std::min(seconds, 0.1)),
+                                                     WaterSettings::kLoopSeconds);
+                }
+                if (options.direct && scene.IsWalking()) {
                     const auto keys = ReadDirectRoamInput(window.Native());
                     scene.UpdateWalk({keys.throttle, keys.steering, keys.reset}, seconds);
-                } else if (scene.IsDriving()) {
+                } else if (options.direct && scene.IsDriving()) {
                     scene.UpdateDrive(ReadDirectRoamInput(window.Native()), static_cast<float>(seconds));
                 }
             }

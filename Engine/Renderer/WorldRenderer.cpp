@@ -205,6 +205,10 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
     if (scene.environment) {
         mSky.emplace(gpu, format, kDepthFormat, root);
     }
+    if (scene.water) {
+        if (!mSky) throw std::runtime_error("Water requires a sky environment.");
+        mWater.emplace(gpu, format, mSky->Environment(), root / "shaders" / "water.wgsl");
+    }
     if (scene.materials) {
         mMaterials.emplace(gpu, root);
         const auto sphere = WithReflectivity(MakeMaterialSphere());
@@ -398,6 +402,7 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
     description.size = {size.width, size.height, 1};
     description.format = kDepthFormat;
     description.usage = WGPUTextureUsage_RenderAttachment;
+    if (mWater) description.usage |= WGPUTextureUsage_TextureBinding;
     TextureHandle texture(wgpuDeviceCreateTexture(mGpu.Device(), &description));
     if (!texture) {
         throw std::runtime_error("Cannot allocate chapter 02 depth texture");
@@ -540,7 +545,9 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         wgpuRenderPassEncoderEnd(depthPass.get());
     }
 
-    auto pass = BeginColorPass(encoder, target, mClearColor, "World color pass", mDepthView.get());
+    const bool showWater = mWater && scene.water && scene.water->view != WaterView::Off && !showSpheres;
+    auto pass = BeginColorPass(encoder, target, mClearColor, "World color pass", mDepthView.get(),
+                               showWater ? WGPUStoreOp_Store : WGPUStoreOp_Discard);
     wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
     if (mShadowMap) {
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
@@ -574,6 +581,9 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         mSky->Draw(pass.get(), projection, view, scene.environment->sky);
     }
     wgpuRenderPassEncoderEnd(pass.get());
+    if (showWater) {
+        mWater->Encode(encoder, target, mDepthView.get(), vp, camera.Position(), *scene.water);
+    }
 }
 
 //————————————————————————————————————————————————————————————————————————————————

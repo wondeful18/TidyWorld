@@ -49,6 +49,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/TriangleRenderer.h
     Engine/Renderer/VegetationRenderer.cpp
     Engine/Renderer/VegetationRenderer.h
+    Engine/Renderer/WaterRenderer.cpp
+    Engine/Renderer/WaterRenderer.h
     Engine/Renderer/WebGpuContext.cpp
     Engine/Renderer/WebGpuContext.h
     Engine/Renderer/WgpuHandle.h
@@ -74,6 +76,7 @@ add_library(TinyWorldEngine STATIC
     Engine/Scene/SceneFile.h
     Engine/Scene/Transform.cpp
     Engine/Scene/Transform.h
+    Engine/Scene/WaterSettings.h
     Engine/Scene/WorldScene.cpp
     Engine/Scene/WorldScene.h
     Engine/Scene/WalkerMesh.cpp
@@ -118,6 +121,7 @@ add_executable(TinyWorld
     Assets/Shaders/triangle.wgsl
     Assets/Shaders/sky.wgsl
     Assets/Shaders/world.wgsl
+    Assets/Shaders/water.wgsl
 )
 target_link_libraries(TinyWorld PRIVATE TinyWorldEngine tinyworld_imguizmo)
 
@@ -148,7 +152,7 @@ foreach(target TinyWorldEngine TinyWorld TinyWorldMeshPacker)
     endif()
 endforeach()
 
-foreach(shader triangle world sky)
+foreach(shader triangle world sky water)
     set(shader_source "${PROJECT_SOURCE_DIR}/Assets/Shaders/${shader}.wgsl")
     set(shader_output "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${shader}.wgsl")
     add_custom_command(OUTPUT "${shader_output}"

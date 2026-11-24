@@ -10,6 +10,7 @@ namespace tinyworld {
 //————————————————————————————————————————————————————————————————————————————————
 [[nodiscard]] PassHandle BeginColorPass(WGPUCommandEncoder encoder, WGPUTextureView target,
                                        WGPUColor clearColor, const char* label,
-                                       WGPUTextureView depthTarget = nullptr);
+                                       WGPUTextureView depthTarget = nullptr,
+                                       WGPUStoreOp depthStore = WGPUStoreOp_Discard);
 
 }  // namespace tinyworld

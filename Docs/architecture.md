@@ -28,6 +28,8 @@
 
 `EnvironmentMap` 在启动时解码实拍全景 JPEG，上传等距柱状原图并重投影到六层 Cubemap。`SkyRenderer` 在物体绘制后选择立方体或球形网格，只保留相机旋转，以远平面深度填充背景。`WorldRenderer` 的环境入口复用 Cubemap，给车漆和玻璃加入不同强度的反射。旧的 `.twmesh` 顶点在上传时扩展为带反射权重的运行时格式。 [第 04 章教程](../Chapters/ch04/README.md)
 
-## 第 13 章扩展
+## 第 13–14 章扩展
 
 `GltfAsset` 将静态 glTF 的节点变换烘入网格，按 primitive 保留 UV 与材质引用。`WorldRenderer` 为资产原型上传网格与材质，为场景实例保留各自的 uniform。JSON 保存相对路径和变换，`WalkController` 用同一个桥实例查局部桥面与引道高度。 [第 13 章教程](../Chapters/ch13/README.md)
+
+`WorldRenderer` 在水可见时保留相机深度。`WaterRenderer` 在单独的通道采样该深度，用逆视图投影重建水下落点，再把半透明水面叠加到已有的颜色。环境 Cubemap 与天空共享。 [第 14 章教程](../Chapters/ch14/README.md)
