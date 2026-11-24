@@ -11,6 +11,7 @@
 #include "Engine/Renderer/WorldVertex.h"
 #include "Engine/Scene/RobotMesh.h"
 #include "Engine/Scene/WorldScene.h"
+#include "Engine/Terrain/ChunkStreamer.h"
 
 #include <array>
 #include <filesystem>
@@ -36,6 +37,9 @@ public:
     [[nodiscard]] MaterialPreviews PaintPreviews() const {
         return mMaterials ? mMaterials->PreviewViews() : MaterialPreviews{};
     }
+    [[nodiscard]] const TerrainStreamStats& StreamStatistics() const { return mStreamStats; }
+    [[nodiscard]] bool StreamingSettled() const;
+    void WaitForChunkData();
     [[nodiscard]] const TerrainDrawStats& TerrainStatistics() const { return mTerrainStats; }
     [[nodiscard]] const VegetationDrawStats& VegetationStatistics() const { return mVegetationStats; }
 
@@ -87,6 +91,9 @@ private:
     // 高度变化后刷新受影响的固定大小顶点缓冲。
     //————————————————————————————————————————————————————————————————————————————————
     void SyncTerrain(const HeightField& field, bool showBorders, bool paintTrail);
+    void SyncTerrainBorders(const HeightField& field, bool showBorders);
+    void SyncStreamedTerrain(const WorldScene& scene);
+    [[nodiscard]] std::uint32_t DrawVegetation(WGPURenderPassEncoder pass, bool instanced, bool shadows) const;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 路线或所贴地形变化时重新裁路面；几何由颜色通道使用。
@@ -143,6 +150,10 @@ private:
     std::array<TerrainBounds, HeightField::kChunkCount> mTerrainBounds{}; // 两档网格共用的包围盒
     std::array<bool, HeightField::kChunkCount> mTerrainVisible{}; // 仅限制相机通道
     TerrainDrawStats mTerrainStats;
+    TerrainStreamStats mStreamStats;
+    std::array<std::size_t, HeightField::kChunkCount> mChunkBytes{}; // 地形顶点和植被实例的提交字节
+    std::optional<ChunkStreamer> mStream;
+    std::array<Drawable, HeightField::kChunkCount> mStreamRoadDraws;
     std::array<bool, HeightField::kChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级
     std::array<Drawable, 4> mMaterialSpheres;                // 成对比较粗糙度与金属度的球
     std::optional<Drawable> mChunkBorders;                  // 仅供颜色通道绘制的边界提示

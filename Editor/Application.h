@@ -7,7 +7,7 @@
 
 namespace tinyworld {
 
-enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water, Coast, Atmosphere, Lightmap, DayCycle, TerrainVisibility };
+enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water, Coast, Atmosphere, Lightmap, DayCycle, TerrainVisibility, TerrainStreaming };
 
 //————————————————————————————————————————————————————————————————————————————————
 // 命令行选择演示内容、输出路径和验证方式。
@@ -16,6 +16,7 @@ struct ApplicationOptions {
     Chapter chapter{Chapter::Triangle};             // 默认维持第一章启动行为
     bool direct{};                                  // 跳过 ImGui，直接画入输出目标
     bool smokeTest{};                               // 检查真实窗口的尺寸变化与恢复
+    bool benchmarkStreaming{};                     // 按固定路线记录 GPU 块的调入与逐出
     bool benchmarkTerrain{};                        // 同一套机位比较地形策略
     std::optional<std::size_t> terrainView;          // 固定路线中的 0–3 号机位
     std::optional<bool> terrainLod;

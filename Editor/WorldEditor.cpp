@@ -1,6 +1,7 @@
 #include "Editor/WorldEditor.h"
 
 #include "Engine/Scene/DayCycle.h"
+#include "Engine/Terrain/ChunkStreamer.h"
 
 #include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Scene/SceneFile.h"
@@ -105,8 +106,9 @@ void BrushOutline(const HeightField& field, glm::vec2 center, float radius, bool
 //————————————————————————————————————————————————————————————————————————————————
 WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt,
                          MaterialPreviews previews, const VegetationDrawStats* vegetationStats,
-                         const TerrainDrawStats* terrainStats)
-    : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mTerrainStats(terrainStats), mSculptEnabled(sculpt && scene.canSculpt) {
+                         const TerrainDrawStats* terrainStats, const TerrainStreamStats* streamStats)
+    : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mStreamStats(streamStats),
+      mTerrainStats(terrainStats), mSculptEnabled(sculpt && scene.canSculpt) {
     if (mScene.shadows) {
         mSelected.reset();
     }
@@ -424,6 +426,17 @@ void WorldEditor::DrawInspector() {
             if (ImGui::Button(names[i])) mScene.camera = WorldScene::kTerrainRoute[i];
         }
         ImGui::EndDisabled();
+        if (mScene.streamTerrain && mStreamStats) {
+            ImGui::SeparatorText("Streaming");
+            const auto& stats = *mStreamStats;
+            ImGui::Text("Focus (%d, %d)", stats.queue.focus.x, stats.queue.focus.y);
+            ImGui::Text("Resident %u / %u (peak %u)", stats.resident, stats.queue.wanted, stats.peakResident);
+            ImGui::Text("Queue %u | Work %u | Ready %u", stats.queue.queued, stats.queue.working, stats.queue.ready);
+            ImGui::Text("Resident buffers %.2f MiB", stats.residentBytes / 1048576.0);
+            ImGui::Text("Upload %u/%u | Peak %.1f KiB", stats.uploaded, ChunkStreamer::kUploadsPerFrame,
+                        stats.peakUploadedBytes / 1024.0);
+            ImGui::Text("Evicted since start: %u", stats.evicted);
+        }
         if (mTerrainStats) {
             const auto& stats = *mTerrainStats;
             ImGui::Text("Visible %u | Culled %u", stats.visible, stats.culled);

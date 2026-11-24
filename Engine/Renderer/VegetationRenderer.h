@@ -37,19 +37,33 @@ class VegetationRenderer {
 public:
     explicit VegetationRenderer(WebGpuContext& gpu);
     void Sync(const HeightField& terrain, const std::optional<RoadSpline>& road, const VegetationSettings& settings);
+    std::size_t UploadChunk(std::size_t index, const VegetationPatch& patch);
+    void EvictChunk(std::size_t index);
+    [[nodiscard]] std::uint32_t DrawChunk(WGPURenderPassEncoder pass, std::size_t index,
+                                           bool instanced, bool shadows) const;
     [[nodiscard]] std::uint32_t Draw(WGPURenderPassEncoder pass, bool instanced, bool shadows) const;
     [[nodiscard]] std::array<std::uint32_t, kVegetationKinds> Counts() const;
 
 private:
-    struct Batch {
+    struct Prototype {
         BufferHandle mesh;
-        BufferHandle instances;
         std::uint32_t vertexCount{};
-        std::uint32_t instanceCount{};
+    };
+    struct InstanceBuffer {
+        BufferHandle buffer;
+        std::uint32_t count{};
         std::size_t capacity{};
     };
+    using Instances = std::array<InstanceBuffer, kVegetationKinds>;
+
+    std::size_t Upload(Instances& buffers, const VegetationPatch& instances);
+    [[nodiscard]] std::uint32_t DrawInstances(WGPURenderPassEncoder pass, const Instances& buffers,
+                                               bool instanced, bool shadows) const;
+
     WebGpuContext& mGpu;
-    std::array<Batch, kVegetationKinds> mBatches;
+    std::array<Prototype, kVegetationKinds> mPrototypes;
+    Instances mGlobal;                            // 早期章节的合批
+    std::array<Instances, HeightField::kChunkCount> mChunks; // 第二十章按块释放实例流
     RoadMask mRoadMask;
     std::optional<RoadSpline> mRoad;
     std::optional<VegetationSettings> mSettings;

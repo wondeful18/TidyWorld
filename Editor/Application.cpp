@@ -96,6 +96,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
     }
     if (options.chapter >= Chapter::DayCycle) scene.dayCycle.emplace();
+    scene.streamTerrain = options.chapter == Chapter::TerrainStreaming;
     if (options.chapter >= Chapter::TerrainVisibility) {
         scene.terrainPreview = TerrainPreview{options.terrainLod.value_or(true), options.terrainCull.value_or(true)};
     }
@@ -148,7 +149,8 @@ struct WorldDemo {
               const std::filesystem::path& root, const ApplicationOptions& options)
         : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
           editor(scene, options.scenePath, options.sculptTools || options.chapter == Chapter::Sculpt,
-                 renderer.PaintPreviews(), &renderer.VegetationStatistics(), &renderer.TerrainStatistics()) {}
+                 renderer.PaintPreviews(), &renderer.VegetationStatistics(), &renderer.TerrainStatistics(),
+                 &renderer.StreamStatistics()) {}
 
     //————————————————————————————————————————————————————————————————————————————————
     // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
@@ -268,7 +270,10 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
     }
     log.Write("CAPTURE", "GPU readback output; no Surface present");
     FrameCapture capture(gpu, size);
-    for (int frame = 0; frame < 3; ++frame) {
+    auto* world = std::get_if<WorldDemo>(&demo);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+    int stableFrames = 0;
+    while (stableFrames < 3) {
         glfwPollEvents();
         gpu.ProcessEvents();
         EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
@@ -276,7 +281,16 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
             throw std::runtime_error("Cannot create capture command encoder");
         }
         EncodeFrame(encoder.get(), capture.View(), demo, editor, log, size, 0.0);
-        if (frame == 2) {
+        if (world && !world->renderer.StreamingSettled()) {
+            SubmitFrame(gpu, encoder.get());
+            if (std::chrono::steady_clock::now() >= deadline) {
+                throw std::runtime_error("Chunk streaming capture timed out.");
+            }
+            stableFrames = 0;
+            world->renderer.WaitForChunkData();
+            continue;
+        }
+        if (++stableFrames == 3) {
             capture.EncodeCopy(encoder.get());
         }
         SubmitFrame(gpu, encoder.get());
@@ -372,6 +386,65 @@ void BenchmarkTerrain(WebGpuContext& gpu, WorldDemo& world) {
     }
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 走固定块键路线，测量实时编码使用的同一套请求、驻留和上传预算。
+//————————————————————————————————————————————————————————————————————————————————
+void BenchmarkStreaming(WebGpuContext& gpu, WorldDemo& world) {
+    using Clock = std::chrono::steady_clock;
+    constexpr PixelSize size{1280, 720};
+    FrameCapture target(gpu, size);
+    const auto frame = [&] {
+        EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
+        if (!encoder) throw std::runtime_error("Cannot create streaming benchmark encoder.");
+        world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
+        SubmitFrame(gpu, encoder.get());
+        wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
+        gpu.ProcessEvents();
+        const auto& stats = world.renderer.StreamStatistics();
+        if (stats.resident > ChunkStreamer::kMaxResident ||
+            stats.uploaded > ChunkStreamer::kUploadsPerFrame ||
+            stats.queue.queued + stats.queue.working + stats.queue.ready > ChunkStreamer::kMaxResident) {
+            throw std::runtime_error("Streaming exceeded a frame or residency limit.");
+        }
+    };
+    const auto visit = [&](const char* name, glm::ivec2 key, bool settle = true) {
+        world.scene.camera = WorldScene::kTerrainRoute[1];
+        const auto center = (glm::vec2(key) + 0.5f) * HeightField::kChunkSize;
+        world.scene.camera.target.x = center.x;
+        world.scene.camera.target.z = center.y;
+        const auto started = Clock::now();
+        frame();
+        const auto& entered = world.renderer.StreamStatistics();
+        const auto stillQueued = entered.queue.queued + entered.queue.working + entered.queue.ready;
+        int frames = 1;
+        while (settle && !world.renderer.StreamingSettled()) {
+            if (Clock::now() - started > std::chrono::seconds(12)) {
+                throw std::runtime_error("Chunk streaming route timed out.");
+            }
+            world.renderer.WaitForChunkData();
+            frame();
+            ++frames;
+        }
+        const auto& stats = world.renderer.StreamStatistics();
+        std::printf("%s | key %d,%d | requested %u | pending after entry %u | resident %u | bytes %zu"
+                    " | evicted total %u | %d frames | %.3f ms\n",
+                    name, key.x, key.y, stats.queue.wanted, stillQueued, stats.resident, stats.residentBytes,
+                    stats.evicted, frames, std::chrono::duration<double, std::milli>(Clock::now() - started).count());
+    };
+    visit("start", {-2, 1});
+    visit("step 1", {-1, 0});
+    visit("step 2", {0, -1});
+    visit("step 3", {1, -1});
+    visit("cape", {2, -2});
+    visit("quick turn A", {-2, 1}, false);
+    visit("quick turn B", {2, -2}, false);
+    visit("return", {-2, 1});
+    const auto& stats = world.renderer.StreamStatistics();
+    if (stats.evicted == 0) throw std::runtime_error("Route did not unload any terrain.");
+    std::printf("peak resident %u | peak upload %zu bytes/frame | limit %u chunks/frame\n",
+                stats.peakResident, stats.peakUploadedBytes, ChunkStreamer::kUploadsPerFrame);
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -446,13 +519,21 @@ int RunApplication(const ApplicationOptions& options) {
         title = "TinyWorld ch19 - Terrain LOD and Frustum Culling";
         ready = "Chapter 19 stitched LOD and camera terrain culling ready";
     }
-    const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain;
+    if (options.chapter == Chapter::TerrainStreaming) {
+        title = "TinyWorld ch20 - Stream Terrain Chunks";
+        ready = "Chapter 20 background terrain, road and plant streaming ready";
+    }
+    const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain || options.benchmarkStreaming;
     Window window(title, options.capturePath.empty() && !benchmark);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
     const auto format = options.direct || benchmark ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
     Demo demo = CreateDemo(gpu, format, root, options);
     log.Write("GPU", ready);
+    if (options.benchmarkStreaming) {
+        BenchmarkStreaming(gpu, std::get<WorldDemo>(demo));
+        return 0;
+    }
     if (options.benchmarkTerrain) {
         BenchmarkTerrain(gpu, std::get<WorldDemo>(demo));
         return 0;

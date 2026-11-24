@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 namespace tinyworld {
 namespace {
@@ -123,8 +124,8 @@ VegetationVertexLayout::VegetationVertexLayout() {
 //————————————————————————————————————————————————————————————————————————————————
 VegetationRenderer::VegetationRenderer(WebGpuContext& gpu) : mGpu(gpu) {
     const std::array geometry{MakeGrassCards(), Solid(MakePine()), Solid(MakeRockMesh())};
-    for (std::size_t i = 0; i < mBatches.size(); ++i) {
-        auto& batch = mBatches[i];
+    for (std::size_t i = 0; i < mPrototypes.size(); ++i) {
+        auto& batch = mPrototypes[i];
         const auto bytes = geometry[i].size() * sizeof(VegetationVertex);
         batch.vertexCount = static_cast<std::uint32_t>(geometry[i].size());
         batch.mesh = MakeVertexBuffer(gpu.Device(), bytes, "Vegetation mesh");
@@ -151,38 +152,77 @@ void VegetationRenderer::Sync(const HeightField& terrain, const std::optional<Ro
             }
         }
     }
-    for (std::size_t i = 0; i < mBatches.size(); ++i) {
-        auto& batch = mBatches[i];
-        const auto bytes = instances[i].size() * sizeof(VegetationInstance);
-        if (bytes > batch.capacity) {
-            batch.instances = MakeVertexBuffer(mGpu.Device(), bytes, "Vegetation instances");
-            batch.capacity = bytes;
-        }
-        batch.instanceCount = static_cast<std::uint32_t>(instances[i].size());
-        if (bytes != 0) wgpuQueueWriteBuffer(mGpu.Queue(), batch.instances.get(), 0, instances[i].data(), bytes);
-    }
+    Upload(mGlobal, instances);
     mTerrainRevision = terrain.Revision();
     mRoad = road;
     mSettings = settings;
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 共用实例上传。全局批保留容量，块加载用新的临时批，上传完成后才替换。
+//————————————————————————————————————————————————————————————————————————————————
+std::size_t VegetationRenderer::Upload(Instances& buffers, const VegetationPatch& instances) {
+    std::size_t total{};
+    for (std::size_t i = 0; i < buffers.size(); ++i) {
+        auto& batch = buffers[i];
+        const auto bytes = instances[i].size() * sizeof(VegetationInstance);
+        if (bytes > batch.capacity) {
+            batch.buffer = MakeVertexBuffer(mGpu.Device(), bytes, "Vegetation instances");
+            batch.capacity = bytes;
+        }
+        batch.count = static_cast<std::uint32_t>(instances[i].size());
+        if (bytes != 0) wgpuQueueWriteBuffer(mGpu.Queue(), batch.buffer.get(), 0, instances[i].data(), bytes);
+        total += bytes;
+    }
+    return total;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 按键替换或释放实例流。所有块仍共享三个原型网格。
+//————————————————————————————————————————————————————————————————————————————————
+std::size_t VegetationRenderer::UploadChunk(std::size_t index, const VegetationPatch& patch) {
+    Instances replacement;
+    const auto bytes = Upload(replacement, patch);
+    mChunks[index] = std::move(replacement);
+    return bytes;
+}
+
+void VegetationRenderer::EvictChunk(std::size_t index) {
+    mChunks[index] = Instances();
+}
+
+std::uint32_t VegetationRenderer::DrawChunk(WGPURenderPassEncoder pass, std::size_t index,
+                                             bool instanced, bool shadows) const {
+    return DrawInstances(pass, mChunks[index], instanced, shadows);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 比较时只改变提交次数和 firstInstance，两个模式消费等量的三角形。
 //————————————————————————————————————————————————————————————————————————————————
 std::uint32_t VegetationRenderer::Draw(WGPURenderPassEncoder pass, bool instanced, bool shadows) const {
+    return DrawInstances(pass, mGlobal, instanced, shadows);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 把共享原型和指定实例批连到两个顶点流。
+//————————————————————————————————————————————————————————————————————————————————
+std::uint32_t VegetationRenderer::DrawInstances(WGPURenderPassEncoder pass, const Instances& buffers,
+                                                 bool instanced, bool shadows) const {
     std::uint32_t calls{};
     // 草接收树木与地形阴影，只有不透明的树和岩石进入太阳通道。
-    for (std::size_t i = shadows ? 1 : 0; i < mBatches.size(); ++i) {
-        const auto& batch = mBatches[i];
-        if (batch.instanceCount == 0) continue;
-        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, batch.mesh.get(), 0, batch.vertexCount * sizeof(VegetationVertex));
-        wgpuRenderPassEncoderSetVertexBuffer(pass, 1, batch.instances.get(), 0, batch.instanceCount * sizeof(VegetationInstance));
+    for (std::size_t i = shadows ? 1 : 0; i < buffers.size(); ++i) {
+        const auto& batch = buffers[i];
+        const auto& prototype = mPrototypes[i];
+        if (batch.count == 0) continue;
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, prototype.mesh.get(), 0,
+                                             prototype.vertexCount * sizeof(VegetationVertex));
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 1, batch.buffer.get(), 0, batch.count * sizeof(VegetationInstance));
         if (instanced) {
-            wgpuRenderPassEncoderDraw(pass, batch.vertexCount, batch.instanceCount, 0, 0);
+            wgpuRenderPassEncoderDraw(pass, prototype.vertexCount, batch.count, 0, 0);
             ++calls;
         } else {
-            for (std::uint32_t instance = 0; instance < batch.instanceCount; ++instance) {
-                wgpuRenderPassEncoderDraw(pass, batch.vertexCount, 1, 0, instance);
+            for (std::uint32_t instance = 0; instance < batch.count; ++instance) {
+                wgpuRenderPassEncoderDraw(pass, prototype.vertexCount, 1, 0, instance);
                 ++calls;
             }
         }
@@ -195,7 +235,10 @@ std::uint32_t VegetationRenderer::Draw(WGPURenderPassEncoder pass, bool instance
 //————————————————————————————————————————————————————————————————————————————————
 std::array<std::uint32_t, kVegetationKinds> VegetationRenderer::Counts() const {
     std::array<std::uint32_t, kVegetationKinds> counts{};
-    for (std::size_t i = 0; i < counts.size(); ++i) counts[i] = mBatches[i].instanceCount;
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        counts[i] = mGlobal[i].count;
+        for (const auto& chunk : mChunks) counts[i] += chunk[i].count;
+    }
     return counts;
 }
 

@@ -17,7 +17,9 @@
 #include <glm/matrix.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <utility>
 #include <stdexcept>
 #include <vector>
 
@@ -268,20 +270,28 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mCabin = UploadMesh(WithReflectivity(MakeCabinMesh()), layout, "Cabin");
     }
     if (terrain) {
+        if (scene.streamTerrain) mStream.emplace();
         for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
             mRobotLimbs[i] = UploadMesh(WithReflectivity(MakeRobotLimb(static_cast<RobotLimb>(i))), layout, "Robot limb");
         }
-        for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
-            for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x) {
-                const auto mesh = MakeTerrainChunk(*terrain, {x, z}, !scene.road);
-                const auto index = mTerrainDraws.size();
-                mTerrainDraws.push_back(UploadMesh(WithReflectivity(mesh), layout, "Terrain chunk"));
-                if (scene.canPreviewLod || scene.terrainPreview) {
-                    const auto coarse = MakeTerrainChunk(*terrain, {x, z}, !scene.road, true);
-                    mCoarseTerrainDraws.push_back(UploadMesh(WithReflectivity(coarse), layout, "Terrain LOD 1"));
+        if (mStream) {
+            // 分配索引槽而不是 GPU 顶点。第一个请求由 Encode 的视点决定。
+            mTerrainDraws.resize(HeightField::kChunkCount);
+            mCoarseTerrainDraws.resize(HeightField::kChunkCount);
+            mRoadMesh.emplace(MakeDrawBinding(layout));
+        } else {
+            for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
+                for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x) {
+                    const auto mesh = MakeTerrainChunk(*terrain, {x, z}, !scene.road);
+                    const auto index = mTerrainDraws.size();
+                    mTerrainDraws.push_back(UploadMesh(WithReflectivity(mesh), layout, "Terrain chunk"));
+                    if (scene.canPreviewLod || scene.terrainPreview) {
+                        const auto coarse = MakeTerrainChunk(*terrain, {x, z}, !scene.road, true);
+                        mCoarseTerrainDraws.push_back(UploadMesh(WithReflectivity(coarse), layout, "Terrain LOD 1"));
+                    }
+                    if (scene.terrainPreview) mTerrainBounds[index] = MeasureTerrainBounds(*terrain, {x, z});
+                    mChunkRevisions[index] = terrain->ChunkRevision(index);
                 }
-                if (scene.terrainPreview) mTerrainBounds[index] = MeasureTerrainBounds(*terrain, {x, z});
-                mChunkRevisions[index] = terrain->ChunkRevision(index);
             }
         }
         mChunkBorders.emplace(UploadMesh(WithReflectivity(MakeChunkBorders(*terrain)), layout, "Chunk borders"));
@@ -312,12 +322,90 @@ void WorldRenderer::SyncTerrain(const HeightField& field, bool showBorders, bool
             mChunkRevisions[index] = revision;
         }
     }
+    SyncTerrainBorders(field, showBorders);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 调试边界继续读全局高度，在打开开关后按修订号更新。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::SyncTerrainBorders(const HeightField& field, bool showBorders) {
     if (showBorders && mBorderRevision != field.Revision()) {
         const auto vertices = WithReflectivity(MakeChunkBorders(field));
         wgpuQueueWriteBuffer(mGpu.Queue(), mChunkBorders->vertices.get(), 0,
                              vertices.data(), vertices.size() * sizeof(WorldVertex));
         mBorderRevision = field.Revision();
     }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 每帧先回收越界块，再上传最多两份 CPU 结果。旧版本可显示到替换成功为止。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::SyncStreamedTerrain(const WorldScene& scene) {
+    const auto focus = scene.IsWalking() ? scene.WalkerPose().position : scene.camera.target;
+    mStream->Update(HeightField::ChunkAt({focus.x, focus.z}), *scene.terrain, scene.road, *scene.vegetation);
+    auto& stats = mStreamStats;
+    stats.uploaded = 0;
+    stats.uploadedBytes = 0;
+    for (std::size_t index = 0; index < mTerrainDraws.size(); ++index) {
+        if (!mTerrainDraws[index].count || mStream->Wants(index)) continue;
+        mTerrainDraws[index] = Drawable();
+        mCoarseTerrainDraws[index] = Drawable();
+        mStreamRoadDraws[index] = Drawable();
+        mVegetation->EvictChunk(index);
+        stats.residentBytes -= mChunkBytes[index];
+        mChunkBytes[index] = 0;
+        --stats.resident;
+        ++stats.evicted;
+    }
+    while (stats.uploaded < ChunkStreamer::kUploadsPerFrame) {
+        auto cpu = mStream->TakeReady();
+        if (!cpu) break;
+        const auto index = cpu->index;
+        auto fine = UploadMesh(WithReflectivity(cpu->fine), mObjectLayout.get(), "Streamed terrain LOD 0");
+        auto coarse = UploadMesh(WithReflectivity(cpu->coarse), mObjectLayout.get(), "Streamed terrain LOD 1");
+        Drawable road;
+        if (!cpu->road.empty()) road = UploadMesh(WithReflectivity(cpu->road), nullptr, "Streamed spline road");
+        const auto bytes = (fine.count + coarse.count + road.count) * sizeof(WorldVertex) +
+                           mVegetation->UploadChunk(index, cpu->plants);
+        if (!mTerrainDraws[index].count) ++stats.resident;
+        stats.residentBytes = stats.residentBytes - mChunkBytes[index] + bytes;
+        mTerrainDraws[index] = std::move(fine);
+        mCoarseTerrainDraws[index] = std::move(coarse);
+        mStreamRoadDraws[index] = std::move(road);
+        mTerrainBounds[index] = cpu->bounds;
+        mChunkBytes[index] = bytes;
+        stats.uploadedBytes += bytes;
+        ++stats.uploaded;
+    }
+    stats.queue = mStream->Statistics();
+    stats.peakResident = std::max(stats.peakResident, stats.resident);
+    stats.peakUploadedBytes = std::max(stats.peakUploadedBytes, stats.uploadedBytes);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 离屏捕获等三张稳定帧。正在等待替换的旧块依然计入驻留。
+//————————————————————————————————————————————————————————————————————————————————
+bool WorldRenderer::StreamingSettled() const {
+    if (!mStream) return true;
+    const auto& s = mStreamStats;
+    return s.queue.wanted != 0 && s.resident == s.queue.wanted &&
+           s.queue.queued == 0 && s.queue.working == 0 && s.queue.ready == 0;
+}
+
+void WorldRenderer::WaitForChunkData() {
+    if (mStream) mStream->WaitForResult(std::chrono::milliseconds(200));
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 前面的章节走原有整图合批，第二十章遍历已上传的实例流。
+//————————————————————————————————————————————————————————————————————————————————
+std::uint32_t WorldRenderer::DrawVegetation(WGPURenderPassEncoder pass, bool instanced, bool shadows) const {
+    if (!mStream) return mVegetation->Draw(pass, instanced, shadows);
+    std::uint32_t draws{};
+    for (std::size_t index = 0; index < mTerrainDraws.size(); ++index) {
+        if (mTerrainDraws[index].count) draws += mVegetation->DrawChunk(pass, index, instanced, shadows);
+    }
+    return draws;
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -448,11 +536,16 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         mMaterials->SyncPaint(mGpu.Queue(), *scene.paint);
     }
     if (const auto* terrain = scene.Terrain()) {
-        SyncTerrain(*terrain, scene.showChunkBorders, !scene.road);
-        if (scene.road) {
+        if (mStream) {
+            SyncStreamedTerrain(scene);
+            SyncTerrainBorders(*terrain, scene.showChunkBorders);
+        } else {
+            SyncTerrain(*terrain, scene.showChunkBorders, !scene.road);
+        }
+        if (!mStream && scene.road) {
             SyncRoad(*terrain, *scene.road);
         }
-        if (mVegetation && scene.vegetation) {
+        if (!mStream && mVegetation && scene.vegetation) {
             mVegetation->Sync(*terrain, scene.road, *scene.vegetation);
         }
     }
@@ -470,6 +563,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const bool useLod = scene.terrainPreview ? scene.terrainPreview->lod : scene.previewLod;
     const bool cull = scene.terrainPreview && scene.terrainPreview->cull;
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        if (!mTerrainDraws[i].count) continue;
         mCoarseChoice[i] = useLod && IsCoarseTerrainChunk(TerrainKey(i), eye);
         mTerrainVisible[i] = !cull || IntersectsTerrainFrustum(frustum, mTerrainBounds[i]);
     }
@@ -544,6 +638,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
                            2.0f * HeightField::kHalfExtent};
     }
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        if (!mTerrainDraws[i].count) continue;
         uploadUniform(mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i], glm::mat4{1.0f},
                       shadowControls, terrainMaterial);
     }
@@ -560,7 +655,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         }
     }
     const bool showBorders = mChunkBorders.has_value() && scene.showChunkBorders && !showSpheres;
-    const bool showRoad = mRoadMesh.has_value() && !showSpheres;
+    const bool showRoad = mRoadMesh.has_value() && scene.road && !showSpheres;
     if (showRoad) {
         uploadUniform(*mRoadMesh, glm::mat4{1.0f}, shadowControls,
                       {3.0f, static_cast<float>(scene.road->surface), 0.0f, 0.0f});
@@ -582,7 +677,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         if (showVegetation) {
             wgpuRenderPassEncoderSetPipeline(depthPass.get(), mShadowMap->VegetationPipeline());
             wgpuRenderPassEncoderSetBindGroup(depthPass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
-            mVegetationStats.shadowDraws = mVegetation->Draw(depthPass.get(), scene.vegetation->instanced, true);
+            mVegetationStats.shadowDraws = DrawVegetation(depthPass.get(), scene.vegetation->instanced, true);
         }
         wgpuRenderPassEncoderEnd(depthPass.get());
     }
@@ -604,7 +699,13 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     if (!showSpheres) DrawProps(pass.get(), scene.props, PropPass::BuiltinColor);
     if (showRoad) {
         // 路面接收地形和地标的阴影；薄路面本身只在颜色通道绘制。
-        DrawMesh(pass.get(), *mRoadMesh);
+        if (mStream) {
+            for (const auto& tile : mStreamRoadDraws) {
+                if (tile.count) DrawMesh(pass.get(), tile, mRoadMesh->binding.get());
+            }
+        } else {
+            DrawMesh(pass.get(), *mRoadMesh);
+        }
     }
     if (showBorders) {
         DrawMesh(pass.get(), *mChunkBorders);
@@ -617,7 +718,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         wgpuRenderPassEncoderSetPipeline(pass.get(), mVegetationPipeline.get());
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
-        mVegetationStats.colorDraws = mVegetation->Draw(pass.get(), scene.vegetation->instanced, false);
+        mVegetationStats.colorDraws = DrawVegetation(pass.get(), scene.vegetation->instanced, false);
     }
     if (mSky && scene.environment) {
         mSky->Draw(pass.get(), projection, view, scene.environment->sky, horizon, light.nightMix);
@@ -634,6 +735,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
 void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleCount,
                                 bool showSpheres, bool shadows) {
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
+        if (!mTerrainDraws[i].count) continue;
         // 相机画面外的地形仍可能把阴影投到画面内。
         if (!shadows && !mTerrainVisible[i]) {
             ++mTerrainStats.culled;
@@ -672,6 +774,10 @@ void WorldRenderer::DrawProps(WGPURenderPassEncoder pass, const std::vector<Plac
                               PropPass type) const {
     const std::array builtins{&mRock, &mDraws[1], &mDraws[2], &mCabin};
     for (std::size_t i = 0; i < props.size(); ++i) {
+        if (mStream) {
+            const auto p = props[i].transform.position;
+            if (!mTerrainDraws[TerrainIndex(HeightField::ChunkAt({p.x, p.z}))].count) continue;
+        }
         const auto asset = props[i].asset;
         const auto instance = mPropDraws[i].binding.get();
         if (asset < kBuiltinPropCount) {

@@ -1,6 +1,6 @@
 # TinyWorld
 
-Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01–19 章。
+Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01–20 章。
 
 ![碎石路跨过木桥并沿河口通向海岬](Chapters/ch15/image/coast-overview.jpg)
 
@@ -27,6 +27,7 @@ Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索�
 | 17 | 手写简单的光照贴图烘焙 | [教程与门廊对照](Chapters/ch17/README.md) | [第 17 章](Chapters/ch17/ch17.pdf) |
 | 18 | 让山谷从白天走到夜晚 | [教程与固定机位三时刻对照](Chapters/ch18/README.md) | [第 18 章](Chapters/ch18/ch18.pdf) |
 | 19 | 地形 LOD 与可见块裁剪 | [教程与路线基准](Chapters/ch19/README.md) | [第 19 章](Chapters/ch19/ch19.pdf) |
+| 20 | 分块加载与卸载 | [教程与驻留路线验收](Chapters/ch20/README.md) | [第 20 章](Chapters/ch20/ch20.pdf) |
 
 [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
@@ -56,6 +57,7 @@ out/build/macos-arm64-debug/bin/TinyWorld --chapter 16
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 17
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 18
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 19
+out/build/macos-arm64-debug/bin/TinyWorld --chapter 20
 ```
 
 第 01 章加 `--direct` 可直接呈现三角形。第 02 章在场景视口内右键拖动可环绕，滚轮可缩放。任一章节加 `--capture output.ppm` 可读取 GPU 绘制结果。
@@ -70,7 +72,7 @@ out/build/macos-arm64-debug/bin/TinyWorld --chapter 19
 
 第 13 章用 `--preset walk` 从村口走上木桥。第 14 章在 `Water` 属性中切换水深、反射和隐藏水面的对照。
 
-第 15 章沿碎石路跨桥抵达海岬，使用 `--preset shore` 看河口近景。第 16 章在 `Atmosphere` 独立调整距离雾和阴影距离。第 17 章在 `Baked lighting` 切换门廊的固定灯光。第 18 章在 `Day / night` 拖动时间轴，让太阳、阴影、天空和水面一起变化。
+第 15 章沿碎石路跨桥抵达海岬，使用 `--preset shore` 看河口近景。第 16 章在 `Atmosphere` 独立调整距离雾和阴影距离。第 17 章在 `Baked lighting` 切换门廊的固定灯光。第 18 章在 `Day / night` 拖动时间轴，让太阳、阴影、天空和水面一起变化。第 19、20 章在 `Terrain performance` 对照提交、驻留和上传计数。
 
 Windows x64 使用 `windows-x64-debug` 构建 preset，详细环境和启动命令见章节教程。各平台的实测范围记录在对应章节。
 

@@ -20,6 +20,7 @@ elseif(WIN32)
 endif()
 
 include(cmake/Dependencies.cmake)
+find_package(Threads REQUIRED)
 
 add_library(TinyWorldEngine STATIC
     Engine/Core/Log.cpp
@@ -93,6 +94,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Terrain/MaterialSplat.h
     Engine/Terrain/RoadSpline.cpp
     Engine/Terrain/RoadSpline.h
+    Engine/Terrain/ChunkStreamer.cpp
+    Engine/Terrain/ChunkStreamer.h
     Engine/Terrain/TerrainVisibility.cpp
     Engine/Terrain/TerrainVisibility.h
     Engine/Terrain/TerrainMesh.cpp
@@ -106,7 +109,7 @@ target_include_directories(TinyWorldEngine PUBLIC "${PROJECT_SOURCE_DIR}")
 target_include_directories(TinyWorldEngine SYSTEM PRIVATE "${Stb_INCLUDE_DIR}" "${CGLTF_INCLUDE_DIR}")
 target_link_libraries(TinyWorldEngine
     PUBLIC glfw glm::glm-header-only wgpu_native::wgpu_native
-    PRIVATE nlohmann_json::nlohmann_json
+    PRIVATE nlohmann_json::nlohmann_json Threads::Threads
 )
 if(APPLE)
     target_link_libraries(TinyWorldEngine PRIVATE "-framework Cocoa" "-framework QuartzCore")
@@ -264,7 +267,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(check Village Coast Lightmap DayCycle TerrainVisibility)
+    foreach(check Village Coast Lightmap DayCycle TerrainVisibility TerrainStreaming)
         set(check_target TinyWorld${check}Checks)
         add_executable(${check_target} Tests/${check}Checks.cpp)
         target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
@@ -277,6 +280,7 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME VillageChecks
         COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME TerrainStreamingChecks COMMAND TinyWorldTerrainStreamingChecks)
     add_test(NAME TerrainVisibilityChecks COMMAND TinyWorldTerrainVisibilityChecks)
     add_test(NAME CoastChecks COMMAND TinyWorldCoastChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
     target_sources(TinyWorldLightmapChecks PRIVATE Tools/LightmapBaker/Bake.cpp)

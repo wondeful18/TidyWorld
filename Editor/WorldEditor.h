@@ -13,6 +13,7 @@
 namespace tinyworld {
 
 struct VegetationDrawStats;
+struct TerrainStreamStats;
 
 //————————————————————————————————————————————————————————————————————————————————
 // 将小屋场景数据接入层级、属性面板和变换手柄。
@@ -25,7 +26,8 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     explicit WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt = false,
                          MaterialPreviews previews = {}, const VegetationDrawStats* vegetationStats = nullptr,
-                         const TerrainDrawStats* terrainStats = nullptr);
+                         const TerrainDrawStats* terrainStats = nullptr,
+                         const TerrainStreamStats* streamStats = nullptr);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 在可编辑地形的视口顶部显示模式按钮与雕刻历史。
@@ -112,6 +114,7 @@ private:
     WorldScene& mScene;                        // 与渲染器共享的 CPU 场景
     MaterialPreviews mPreviews;                // 借用渲染器的四个底色贴图切片
     const VegetationDrawStats* mVegetationStats;  // 渲染器记录上一帧实际提交的批次
+    const TerrainStreamStats* mStreamStats;     // 上一帧块驻留与上传统计
     const TerrainDrawStats* mTerrainStats;       // 上一帧地形统计
     std::optional<std::size_t> mSelected{2};   // 物体索引，kObjectCount 表示出生点，空值表示太阳
     std::array<char, 4096> mScenePath{};       // ImGui 编辑的 UTF-8 文件路径
