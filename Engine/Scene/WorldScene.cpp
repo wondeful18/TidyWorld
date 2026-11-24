@@ -32,6 +32,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     auto paintMap = std::move(paint);
     auto roadLayout = std::move(road);
     const bool placeProps = canPlaceProps;
+    const bool gltfProps = canUseGltfProps;
     auto placedProps = std::move(props);
     const auto vegetationSettings = vegetation;
     *this = WorldScene{};
@@ -47,6 +48,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     paint = std::move(paintMap);
     road = std::move(roadLayout);
     canPlaceProps = placeProps;
+    canUseGltfProps = gltfProps;
     props = std::move(placedProps);
     vegetation = vegetationSettings;
     if (materials) {
@@ -173,7 +175,7 @@ void WorldScene::SetWalking(bool active) {
             materials->spheres = false;
         }
         SetDriving(false);
-        mWalker.emplace(*spawn, objects[kGroundIndex].transform, Terrain());
+        mWalker.emplace(*spawn, objects[kGroundIndex].transform, Terrain(), props);
     } else if (!active) {
         mWalker.reset();
     }
@@ -184,7 +186,7 @@ void WorldScene::SetWalking(bool active) {
 //————————————————————————————————————————————————————————————————————————————————
 void WorldScene::UpdateWalk(WalkInput input, double deltaSeconds) {
     if (mWalker) {
-        mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain());
+        mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain(), props);
     }
 }
 
@@ -192,7 +194,7 @@ void WorldScene::UpdateWalk(WalkInput input, double deltaSeconds) {
 // 预览与步行沿用同一个脚底坐标转换，保证进入时从预览位置出发。
 //————————————————————————————————————————————————————————————————————————————————
 Transform WorldScene::WalkerPose() const {
-    return mWalker ? mWalker->Pose() : spawn->WorldPose(objects[kGroundIndex].transform, Terrain());
+    return mWalker ? mWalker->Pose() : spawn->WorldPose(objects[kGroundIndex].transform, Terrain(), props);
 }
 
 //————————————————————————————————————————————————————————————————————————————————

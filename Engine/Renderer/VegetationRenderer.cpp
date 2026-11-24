@@ -139,7 +139,8 @@ void VegetationRenderer::Sync(const HeightField& terrain, const std::optional<Ro
                                const VegetationSettings& settings) {
     const bool roadChanged = road != mRoad;
     if (mSettings && settings.mode == mSettings->mode && settings.seed == mSettings->seed &&
-        settings.density == mSettings->density && terrain.Revision() == mTerrainRevision && !roadChanged) return;
+        settings.density == mSettings->density && settings.minPlantHeight == mSettings->minPlantHeight &&
+        terrain.Revision() == mTerrainRevision && !roadChanged) return;
     if (roadChanged) mRoadMask = road ? MakeRoadMask(*road) : RoadMask{};
     VegetationPatch instances;
     for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Platform/Window.h"
+#include "Engine/Renderer/GltfMaterials.h"
 #include "Engine/Renderer/SkyRenderer.h"
 #include "Engine/Renderer/SunShadowMap.h"
 #include "Engine/Renderer/SurfaceMaterials.h"
@@ -64,7 +65,21 @@ private:
     [[nodiscard]] Drawable UploadMesh(std::span<const WorldVertex> vertices, WGPUBindGroupLayout layout,
                                       const char* name);
     [[nodiscard]] Drawable MakeDrawBinding(WGPUBindGroupLayout layout);
-    void SyncProps(const std::vector<PlacedProp>& props);
+    //————————————————————————————————————————————————————————————————————————————————
+    // 按场景实例数分配每物体 uniform，几何与材质一直由原型持有。
+    //————————————————————————————————————————————————————————————————————————————————
+    void SyncProps(std::size_t count);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 上传课程的 glTF 原型。场景重新打开时只需要交换实例记录。
+    //————————————————————————————————————————————————————————————————————————————————
+    void LoadGltfProps(const std::filesystem::path& root);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 阴影通道提交全部物体。颜色通道把内置和 glTF 物体分批调用。
+    //————————————————————————————————————————————————————————————————————————————————
+    enum class PropPass { BuiltinColor, GltfColor, Shadows };
+    void DrawProps(WGPURenderPassEncoder pass, const std::vector<PlacedProp>& props, PropPass type) const;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 高度变化后刷新受影响的固定大小顶点缓冲。
@@ -84,7 +99,23 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     // 绑定一个网格的顶点与 uniform，提交一次非索引绘制。
     //————————————————————————————————————————————————————————————————————————————————
-    static void DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh);
+    static void DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh, WGPUBindGroup instance = nullptr);
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 原型的一个三角形批次，带与其他实例共享的材质绑定。
+    //————————————————————————————————————————————————————————————————————————————————
+    struct GltfDraw {
+        Drawable mesh;             // 原型顶点和三角形顶点数
+        std::size_t material{};    // 对应同一原型的 GPU 材质索引
+    };
+
+    //————————————————————————————————————————————————————————————————————————————————
+    // 一份 glTF 原型的数据，多次摆放也只上传一次。
+    //————————————————————————————————————————————————————————————————————————————————
+    struct GltfPrototype {
+        std::vector<GltfDraw> meshes;           // 按材质划分的网格批次
+        std::vector<BindGroupHandle> materials; // 底色、金属粗糙度与系数
+    };
 
     WebGpuContext& mGpu;                                   // 借用 GPU 上下文，覆盖所有资源的生命期
     BindGroupLayoutHandle mObjectLayout;                    // 保留动态路面上传所需的物体布局
@@ -100,7 +131,10 @@ private:
     std::array<Drawable, kRobotLimbCount> mRobotLimbs;
     Drawable mRock;
     Drawable mCabin;
-    std::vector<Drawable> mPropDraws;
+    std::vector<Drawable> mPropDraws;  // 手摆实例独立的世界变换常量
+    std::optional<GltfMaterials> mGltfMaterials;  // 第十三章导入材质布局与采样器
+    PipelineHandle mGltfPipeline;    // 含 UV 输入并复用 GGX 的颜色管线
+    std::array<GltfPrototype, kPropAssets.size() - kBuiltinPropCount> mGltfProps;  // 课程 glTF 资产原型
     std::vector<Drawable> mTerrainDraws;                    // 每个整数块键对应一次绘制
     std::vector<Drawable> mCoarseTerrainDraws;              // 第六章同一批块的 LOD1 网格
     std::array<bool, HeightField::kChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级

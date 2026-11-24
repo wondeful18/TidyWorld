@@ -33,6 +33,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/Color.h
     Engine/Renderer/EnvironmentMap.cpp
     Engine/Renderer/EnvironmentMap.h
+    Engine/Renderer/GltfMaterials.cpp
+    Engine/Renderer/GltfMaterials.h
     Engine/Renderer/RenderPass.cpp
     Engine/Renderer/RenderPass.h
     Engine/Renderer/ShaderModule.cpp
@@ -53,6 +55,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/WorldRenderer.cpp
     Engine/Renderer/WorldRenderer.h
     Engine/Renderer/WorldVertex.h
+    Engine/Scene/GltfAsset.cpp
+    Engine/Scene/GltfAsset.h
     Engine/Scene/OrbitCamera.cpp
     Engine/Scene/OrbitCamera.h
     Engine/Scene/PlacedProp.cpp
@@ -88,7 +92,7 @@ add_library(TinyWorldEngine STATIC
     Runtime/WalkController.h
 )
 target_include_directories(TinyWorldEngine PUBLIC "${PROJECT_SOURCE_DIR}")
-target_include_directories(TinyWorldEngine SYSTEM PRIVATE "${Stb_INCLUDE_DIR}")
+target_include_directories(TinyWorldEngine SYSTEM PRIVATE "${Stb_INCLUDE_DIR}" "${CGLTF_INCLUDE_DIR}")
 target_link_libraries(TinyWorldEngine
     PUBLIC glfw glm::glm-header-only wgpu_native::wgpu_native
     PRIVATE nlohmann_json::nlohmann_json
@@ -171,6 +175,8 @@ list(APPEND deployed_assets "${panorama_output}")
 # 第八章和后续章节从第七章的同一份山谷开始，并部署原创建材贴图。
 set(sample_assets
     scenes/ch07/valley.json
+    scenes/ch13/village.json
+    models/ch13/house.glb models/ch13/fence.glb models/ch13/bridge.glb
     materials/ch08/grass-color.png materials/ch08/grass-rough.png
     materials/ch08/gravel-color.png materials/ch08/gravel-rough.png
     materials/ch08/rock-color.png materials/ch08/rock-rough.png
@@ -179,6 +185,7 @@ set(sample_assets
 foreach(asset IN LISTS sample_assets)
     string(REGEX REPLACE "^scenes/" "Scenes/" source_asset "${asset}")
     string(REGEX REPLACE "^materials/" "Materials/" source_asset "${source_asset}")
+    string(REGEX REPLACE "^models/" "Models/" source_asset "${source_asset}")
     set(input "${PROJECT_SOURCE_DIR}/Assets/${source_asset}")
     set(output "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${asset}")
     get_filename_component(asset_dir "${output}" DIRECTORY)
@@ -221,4 +228,18 @@ add_custom_target(TinyWorldRuntime DEPENDS "${wgpu_runtime_output}")
 add_dependencies(TinyWorld TinyWorldRuntime)
 if(APPLE)
     set_target_properties(TinyWorld PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(TinyWorldVillageChecks Tests/VillageChecks.cpp)
+    target_link_libraries(TinyWorldVillageChecks PRIVATE TinyWorldEngine)
+    target_compile_options(TinyWorldVillageChecks PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+    add_dependencies(TinyWorldVillageChecks TinyWorldAssets TinyWorldRuntime)
+    if(APPLE)
+        set_target_properties(TinyWorldVillageChecks PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
+    endif()
+    add_test(NAME VillageChecks
+        COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

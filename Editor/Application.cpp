@@ -67,15 +67,19 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         scene.road.emplace();
     }
     scene.canPlaceProps = options.chapter >= Chapter::Props;
+    scene.canUseGltfProps = options.chapter >= Chapter::Village;
+    if (scene.canUseGltfProps && options.scenePath.empty()) {
+        scenePath = root / "scenes" / "ch13" / "village.json";
+    }
     if (options.chapter >= Chapter::Meadow) {
         scene.vegetation.emplace();
-        if (options.chapter == Chapter::Ecology) scene.vegetation->mode = VegetationMode::TerrainRules;
+        if (options.chapter >= Chapter::Ecology) scene.vegetation->mode = VegetationMode::TerrainRules;
     }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
         LoadScene(scenePath, scene);
-        if (scene.vegetation && options.scenePath.empty()) {
+        if (scene.vegetation && options.scenePath.empty() && !scene.canUseGltfProps) {
             scene.camera = {{0.0f, 0.5f, 2.0f}, 13.0f, 30.0f, 38.0f};
         }
         if (options.shadowOverrides) {
@@ -340,6 +344,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Ecology) {
         title = "TinyWorld ch12 - Terrain Ecology";
         ready = "Chapter 12 seeded terrain vegetation and road exclusion ready";
+    } else if (options.chapter == Chapter::Village) {
+        title = "TinyWorld ch13 - Village Assets and Footbridge";
+        ready = "Chapter 13 glTF meshes, PBR textures and bridge walking ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");

@@ -24,6 +24,7 @@ constexpr int kTerrainVersion = 2;
 constexpr int kRoadVersion = 3;
 constexpr int kPropVersion = 4;
 constexpr int kEcologyVersion = 5;
+constexpr int kVillageVersion = 6;
 constexpr int kLegacyHeightSide = 65;
 constexpr int kLegacyPaintSide = 128;
 constexpr float kCoordinateLimit = 1000000.0f;
@@ -136,7 +137,7 @@ Json Encode(const WorldScene& scene) {
     const auto& sky = scene.environment.value();
     const bool ecology = scene.vegetation && scene.vegetation->mode == VegetationMode::TerrainRules;
     Json doc = {
-        {"version", ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
+        {"version", scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
                                         : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion},
         {"objects", objects},
         {"spawn", {{scene.terrain ? "world_xz" : "ground_xz", Json::array({spawn.groundXZ.x, spawn.groundXZ.y})},
@@ -193,7 +194,10 @@ Json Encode(const WorldScene& scene) {
         }
     }
     if (ecology) {
-        doc["vegetation"] = {{"seed", scene.vegetation->seed}, {"density", scene.vegetation->density}};
+        auto& vegetation = doc["vegetation"] = {{"seed", scene.vegetation->seed}, {"density", scene.vegetation->density}};
+        if (scene.canUseGltfProps && scene.vegetation->minPlantHeight) {
+            vegetation["min_plant_y_m"] = *scene.vegetation->minPlantHeight;
+        }
     }
     return doc;
 }
@@ -227,7 +231,7 @@ WorldScene Decode(const Json& doc) {
     const auto& version = doc.at("version");
     if (!version.is_number_integer() || (version != kSceneVersion && version != kTerrainVersion &&
                                          version != kRoadVersion && version != kPropVersion &&
-                                         version != kEcologyVersion)) {
+                                         version != kEcologyVersion && version != kVillageVersion)) {
         throw std::runtime_error("Unsupported scene file version.");
     }
     WorldScene scene;
@@ -300,6 +304,7 @@ WorldScene Decode(const Json& doc) {
     ReadObjects(doc.at("objects"), scene);
     if (version.get<int>() >= kPropVersion) {
         scene.canPlaceProps = true;
+        scene.canUseGltfProps = version.get<int>() >= kVillageVersion;
         const auto& props = doc.at("props");
         if (!props.is_array() || props.size() > PlacedProp::kLimit) {
             throw std::runtime_error("Invalid number of placed props.");
@@ -309,10 +314,14 @@ WorldScene Decode(const Json& doc) {
             const auto asset = std::find_if(kPropAssets.begin(), kPropAssets.end(),
                                             [&](const PropAsset& item) { return id == item.id; });
             if (asset == kPropAssets.end()) throw std::runtime_error("Unknown placed prop asset.");
-            scene.props.push_back({static_cast<std::size_t>(asset - kPropAssets.begin()), ReadTransform(entry)});
+            const auto index = static_cast<std::size_t>(asset - kPropAssets.begin());
+            if (index >= kBuiltinPropCount && !scene.canUseGltfProps) {
+                throw std::runtime_error("glTF props require a village scene.");
+            }
+            scene.props.push_back({index, ReadTransform(entry)});
         }
     }
-    if (version == kEcologyVersion) {
+    if (version == kEcologyVersion || (version == kVillageVersion && doc.contains("vegetation"))) {
         const auto& settings = doc.at("vegetation");
         const auto& seed = settings.at("seed");
         if (!seed.is_number_integer() || seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
@@ -322,6 +331,10 @@ WorldScene Decode(const Json& doc) {
         vegetation.mode = VegetationMode::TerrainRules;
         vegetation.seed = seed.get<std::uint32_t>();
         vegetation.density = ReadNumber(settings.at("density"), 0.0f, 1.0f);
+        if (scene.canUseGltfProps && settings.contains("min_plant_y_m")) {
+            vegetation.minPlantHeight = ReadNumber(settings.at("min_plant_y_m"), -HeightField::kHeightLimit,
+                                                   HeightField::kHeightLimit);
+        }
     }
 
     const auto& spawn = doc.at("spawn");
@@ -428,6 +441,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     if (loaded.canPlaceProps && !scene.canPlaceProps) {
         throw std::runtime_error("Prop scenes open in Chapter 10 or later.");
     }
+    if (loaded.canUseGltfProps && !scene.canUseGltfProps) {
+        throw std::runtime_error("Village scenes open in Chapter 13 or later.");
+    }
+    loaded.canUseGltfProps = scene.canUseGltfProps;
     if (scene.road && !loaded.road) {
         loaded.road.emplace();
     }

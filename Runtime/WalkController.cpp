@@ -3,11 +3,14 @@
 #include "Engine/Terrain/HeightField.h"
 
 #include <glm/geometric.hpp>
+#include <glm/matrix.hpp>
+#include <glm/vec4.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace tinyworld {
 namespace {
@@ -25,14 +28,37 @@ glm::vec3 Forward(float yaw) {
     return {std::sin(glm::radians(yaw)), 0.0f, std::cos(glm::radians(yaw))};
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 以竖直线查询桥面。只接纳足够朝上的表面，防止旋转成墙的桥仍可踩踏。
+//————————————————————————————————————————————————————————————————————————————————
+float WalkSurfaceHeight(const HeightField& terrain, glm::vec2 xz, std::span<const PlacedProp> props,
+                        float maxDeckHeight = std::numeric_limits<float>::infinity()) {
+    float height = terrain.HeightAt(xz);
+    for (const auto& prop : props) {
+        if (prop.asset != kBridgeAsset) continue;
+        const auto model = prop.transform.Matrix();
+        const auto normal = glm::normalize(glm::cross(glm::vec3(model[2]), glm::vec3(model[0])));
+        if (normal.y < 0.55f) continue;
+        const auto center = prop.transform.position;
+        const float y = center.y - (normal.x * (xz.x - center.x) + normal.z * (xz.y - center.z)) / normal.y;
+        if (y <= height || y > maxDeckHeight) continue;
+        const auto local = glm::inverse(model) * glm::vec4(xz.x, y, xz.y, 1.0f);
+        if (std::abs(local.x) <= kBridgeDeckHalfWidth && std::abs(local.z) <= kBridgeDeckHalfLength) {
+            height = y;
+        }
+    }
+    return height;
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
 // T × R × S 作用于脚底的点，朝向向量只应用 R × S。
 //————————————————————————————————————————————————————————————————————————————————
-Transform WalkSpawn::WorldPose(const Transform& ground, const HeightField* terrain) const {
+Transform WalkSpawn::WorldPose(const Transform& ground, const HeightField* terrain,
+                               std::span<const PlacedProp> props) const {
     if (terrain) {
-        return {{groundXZ.x, terrain->HeightAt(groundXZ), groundXZ.y}, {0.0f, yaw, 0.0f}};
+        return {{groundXZ.x, WalkSurfaceHeight(*terrain, groundXZ, props), groundXZ.y}, {0.0f, yaw, 0.0f}};
     }
     const auto model = ground.Matrix();
     const auto feet = glm::vec3(model * glm::vec4(groundXZ.x, 0.0f, groundXZ.y, 1.0f));
@@ -47,8 +73,9 @@ Transform WalkSpawn::WorldPose(const Transform& ground, const HeightField* terra
 //————————————————————————————————————————————————————————————————————————————————
 // 从出生点生成脚底和跟随相机，固定距离保留前方可检查的地面。
 //————————————————————————————————————————————————————————————————————————————————
-WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain)
-    : mFeet(spawn) {
+WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain,
+                               std::span<const PlacedProp> props)
+    : mFeet(spawn), mFeetHeight(terrain ? WalkSurfaceHeight(*terrain, spawn.groundXZ, props) : 0.0f) {
     mCamera.distance = 4.3f;
     mCamera.elevation = 9.0f;
     Follow(ground, terrain);
@@ -58,9 +85,9 @@ WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, 
 // 每个时间步先转向、再按世界米数移动，并把局部坐标夹在草台边界内。
 //————————————————————————————————————————————————————————————————————————————————
 void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, WalkInput input,
-                            double deltaSeconds, const HeightField* terrain) {
+                            double deltaSeconds, const HeightField* terrain, std::span<const PlacedProp> props) {
     if (input.reset) {
-        *this = WalkController(spawn, ground, terrain);
+        *this = WalkController(spawn, ground, terrain, props);
         return;
     }
 
@@ -81,6 +108,11 @@ void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, Wal
         mFeet.groundXZ += glm::vec2(forward.x, forward.z) * travel;
         mFeet.groundXZ.x = std::clamp(mFeet.groundXZ.x, -limitX, limitX);
         mFeet.groundXZ.y = std::clamp(mFeet.groundXZ.y, -limitZ, limitZ);
+        if (terrain) {
+            // 从沟底靠近桥时，只有可迈上去的桥面才成为新的脚底高度。
+            constexpr float maxStepUp = 0.24f;
+            mFeetHeight = WalkSurfaceHeight(*terrain, mFeet.groundXZ, props, mFeetHeight + maxStepUp);
+        }
         const auto moved = mFeet.groundXZ - previous;
         const float distance = glm::length(groundBasis * glm::vec3{moved.x, 0.0f, moved.y});
         const bool stepping = distance > 1.0e-5f;
@@ -100,6 +132,7 @@ void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, Wal
 //————————————————————————————————————————————————————————————————————————————————
 void WalkController::Follow(const Transform& ground, const HeightField* terrain) {
     mPose = mFeet.WorldPose(ground, terrain);
+    if (terrain) mPose.position.y = mFeetHeight;
     const float yaw = mPose.rotationDegrees.y;
     mCamera.target = mPose.position + glm::vec3{0.0f, 1.05f, 0.0f} + Forward(yaw) * 0.45f;
     mCamera.azimuth = yaw + 180.0f;

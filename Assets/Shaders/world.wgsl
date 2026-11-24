@@ -22,6 +22,18 @@ struct DrawUniform {
 @group(3) @binding(1) var surfaceRough: texture_2d_array<f32>;
 @group(3) @binding(2) var surfaceSampler: sampler;
 @group(3) @binding(3) var terrainSplat: texture_2d<f32>;
+@group(3) @binding(4) var gltfBase: texture_2d<f32>;
+@group(3) @binding(5) var gltfMetalRough: texture_2d<f32>;
+@group(3) @binding(6) var gltfSampler: sampler;
+
+//————————————————————————————————————————————————————————————————————————————————
+// glTF 的线性底色、金属度和粗糙度系数占两个 16 字节槽。
+//————————————————————————————————————————————————————————————————————————————————
+struct GltfFactors {
+    baseAndMetal: vec4<f32>,    // RGB 是底色，A 是金属度乘数
+    roughness: vec4<f32>,      // X 是粗糙度乘数，其余用于对齐
+}
+@group(3) @binding(7) var<uniform> gltfFactors: GltfFactors;
 
 //————————————————————————————————————————————————————————————————————————————————
 // 在顶点和片元阶段之间传递世界法线与线性底色。
@@ -32,6 +44,7 @@ struct VertexOutput {
     @location(1) color: vec3<f32>,           // 线性材质底色
     @location(2) lightClip: vec4<f32>,       // 第三章插值后用于阴影查询的太阳裁剪坐标
     @location(3) worldPosition: vec3<f32>,   // 第四章用于求观察方向的世界位置
+    @location(5) uv: vec2<f32>,             // glTF 原始纹理坐标
     @location(4) reflectivity: f32,         // 车漆和玻璃有反射，灯和轮胎为 0
 }
 
@@ -382,4 +395,43 @@ fn fsVegetationLinear(in: VegetationOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fsVegetationDisplay(in: VegetationOutput) -> @location(0) vec4<f32> {
     return encodeDisplay(shadeVegetation(in));
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// glTF 顶点沿用世界和太阳变换，并传递 glTF 的首套纹理坐标。
+//————————————————————————————————————————————————————————————————————————————————
+@vertex
+fn vsGltf(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>,
+          @location(2) color: vec3<f32>, @location(4) uv: vec2<f32>) -> VertexOutput {
+    var output = worldVertex(position, normal, color);
+    output.lightClip = sunClipPosition(position);
+    output.worldPosition = (draw.model * vec4<f32>(position, 1.0)).xyz;
+    output.uv = uv;
+    return output;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 金属度读 B，粗糙度读 G，底色由 sRGB 纹理采样时自动转为线性。
+//————————————————————————————————————————————————————————————————————————————————
+fn shadeGltf(input: VertexOutput) -> vec3<f32> {
+    let base = textureSample(gltfBase, gltfSampler, input.uv).rgb * gltfFactors.baseAndMetal.rgb;
+    let metalRough = textureSample(gltfMetalRough, gltfSampler, input.uv);
+    return shadePbr(input, base, metalRough.b * gltfFactors.baseAndMetal.a,
+                    metalRough.g * gltfFactors.roughness.x);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// sRGB 附件接收线性颜色。
+//————————————————————————————————————————————————————————————————————————————————
+@fragment
+fn fsGltfLinear(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(shadeGltf(input), 1.0);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 普通 Unorm 附件接收经过显示编码的颜色。
+//————————————————————————————————————————————————————————————————————————————————
+@fragment
+fn fsGltfDisplay(input: VertexOutput) -> @location(0) vec4<f32> {
+    return encodeDisplay(shadeGltf(input));
 }

@@ -97,8 +97,9 @@ struct WorldScene {
     std::optional<MaterialSplat> paint;  // 第八章的共享 RGBA 权重图
     std::optional<RoadSpline> road;  // 第九章保存道路控制点与宽度
     bool canPlaceProps{};  // 第十章启用物体摆放
-    std::vector<PlacedProp> props;
-    std::optional<VegetationSettings> vegetation;
+    std::vector<PlacedProp> props;  // 保存的手摆资产实例
+    bool canUseGltfProps{};  // 第十三章开启 glTF 原型与桥面查询
+    std::optional<VegetationSettings> vegetation;  // 由样地或规则生成的植被参数
 
     //————————————————————————————————————————————————————————————————————————————————
     // 借用可选的高度场。只在本次地面查询或网格生成期间使用。

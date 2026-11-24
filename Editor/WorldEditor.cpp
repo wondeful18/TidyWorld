@@ -108,10 +108,12 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
+        mSelected = mScene.canUseGltfProps ? kPropsPanel
+            : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
-            ? std::u8string{mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
+            ? std::u8string{mScene.canUseGltfProps ? u8"village-ch13.json"
+                : mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
                                                 ? u8"valley-ch12.json" : u8"valley-ch11.json")
                 : mScene.canPlaceProps ? u8"valley-ch10.json" : mScene.road ? u8"valley-ch09.json"
                 : mScene.canSculpt ? u8"valley-ch07.json" : u8"scene-ch05.json"}
@@ -563,7 +565,8 @@ void WorldEditor::DrawPropsPalette() {
     const auto& style = ImGui::GetStyle();
     const float width = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
     ImGui::BeginDisabled(mScene.props.size() >= PlacedProp::kLimit);
-    for (std::size_t i = 0; i < kPropAssets.size(); ++i) {
+    const auto count = mScene.canUseGltfProps ? kPropAssets.size() : kBuiltinPropCount;
+    for (std::size_t i = 0; i < count; ++i) {
         if (i % 2 == 1) ImGui::SameLine();
         const bool armed = mPlacement == i;
         if (armed) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));

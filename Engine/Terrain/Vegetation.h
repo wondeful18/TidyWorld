@@ -4,6 +4,8 @@
 
 #include <glm/vec4.hpp>
 
+#include <optional>
+
 namespace tinyworld {
 
 enum class VegetationKind { Grass, Tree, Rock, Count };
@@ -19,6 +21,7 @@ struct VegetationSettings {
     float density{0.75f};
     bool visible{true};
     bool instanced{true};
+    std::optional<float> minPlantHeight{};  // 草和树的最低落点 Y，单位为米
 };
 
 //————————————————————————————————————————————————————————————————————————————————

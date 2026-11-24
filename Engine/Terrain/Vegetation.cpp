@@ -100,6 +100,8 @@ VegetationPatch GenerateVegetationChunk(const HeightField& field, const RoadMask
                 const auto random = [&](std::uint32_t offset) { return Random01(grid, settings.seed, stream + offset); };
                 const auto xz = (glm::vec2(grid) + 0.19f + 0.62f * glm::vec2{random(0), random(1)}) * spacing;
                 const float y = field.HeightAt(xz);
+                if (species != VegetationKind::Rock && settings.minPlantHeight &&
+                    y < *settings.minPlantHeight) continue;
                 float chance;
                 if (terrainRules) {
                     constexpr float d = HeightField::kSpacing;

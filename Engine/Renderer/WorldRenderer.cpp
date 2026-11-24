@@ -4,6 +4,7 @@
 #include "Engine/Renderer/RenderPass.h"
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
+#include "Engine/Scene/GltfAsset.h"
 #include "Engine/Scene/RobotMesh.h"
 #include "Engine/Scene/RoamingCarMesh.h"
 #include "Engine/Scene/SceneMesh.h"
@@ -84,28 +85,31 @@ BindGroupLayoutHandle BuildObjectLayout(WebGpuContext& gpu) {
 //————————————————————————————————————————————————————————————————————————————————
 PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUShaderModule shader,
                              WGPUBindGroupLayout objects, WGPUBindGroupLayout shadows,
-                             WGPUBindGroupLayout environment, WGPUBindGroupLayout materials, bool vegetation = false) {
+                             WGPUBindGroupLayout environment, WGPUBindGroupLayout materials,
+                             bool vegetation = false, bool gltf = false) {
     const std::array layouts{objects, shadows, environment, materials};
     WGPUPipelineLayoutDescriptor pipelineLayout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
     pipelineLayout.bindGroupLayoutCount = materials ? 4 : (environment ? 3 : (shadows ? 2 : 1));
     pipelineLayout.bindGroupLayouts = layouts.data();
 
-    std::array<WGPUVertexAttribute, 4> attributes{};
+    std::array<WGPUVertexAttribute, 5> attributes{};
     constexpr auto geometry = offsetof(WorldVertex, geometry);
     constexpr std::array offsets{geometry + offsetof(SceneVertex, position),
                                  geometry + offsetof(SceneVertex, normal),
                                  geometry + offsetof(SceneVertex, color),
-                                 offsetof(WorldVertex, reflectivity)};
+                                 offsetof(WorldVertex, reflectivity), offsetof(WorldVertex, uv)};
     for (std::uint32_t i = 0; i < attributes.size(); ++i) {
         attributes[i] = WGPU_VERTEX_ATTRIBUTE_INIT;
-        attributes[i].format = i == 3 ? WGPUVertexFormat_Float32 : WGPUVertexFormat_Float32x3;
+        attributes[i].format = WGPUVertexFormat_Float32x3;
+        if (i == 3) attributes[i].format = WGPUVertexFormat_Float32;
+        if (i == 4) attributes[i].format = WGPUVertexFormat_Float32x2;
         attributes[i].offset = offsets[i];
         attributes[i].shaderLocation = i;
     }
     WGPUVertexBufferLayout layout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
     layout.arrayStride = sizeof(WorldVertex);
     layout.stepMode = WGPUVertexStepMode_Vertex;
-    layout.attributeCount = environment ? attributes.size() : 3;
+    layout.attributeCount = gltf ? attributes.size() : (environment ? 4 : 3);
     layout.attributes = attributes.data();
 
     WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
@@ -123,6 +127,9 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUS
     if (materials) {
         entry = srgb ? "fsMaterialsLinear" : "fsMaterialsDisplay";
     }
+    if (gltf) {
+        entry = srgb ? "fsGltfLinear" : "fsGltfDisplay";
+    }
     if (vegetation) {
         entry = srgb ? "fsVegetationLinear" : "fsVegetationDisplay";
     }
@@ -139,7 +146,9 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUS
     description.label = {vegetation ? "Vegetation color pipeline" : "World color pipeline", WGPU_STRLEN};
     description.vertex.module = shader;
     const char* vertexEntry = shadows ? "vsShadowedWorld" : "vsWorld";
-    description.vertex.entryPoint = {environment ? "vsEnvironmentWorld" : vertexEntry, WGPU_STRLEN};
+    if (environment) vertexEntry = "vsEnvironmentWorld";
+    if (gltf) vertexEntry = "vsGltf";
+    description.vertex.entryPoint = {vertexEntry, WGPU_STRLEN};
     description.vertex.bufferCount = 1;
     description.vertex.buffers = &layout;
     description.primitive.cullMode = WGPUCullMode_Back;
@@ -212,6 +221,16 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mVegetationUniform = MakeDrawBinding(layout);
         mVegetationPipeline = BuildPipeline(gpu, format, shader.get(), layout,
                                             mShadowMap->SamplingLayout(), nullptr, nullptr, true);
+    }
+
+    if (scene.canUseGltfProps) {
+        if (!mShadowMap || !mSky || !mMaterials) {
+            throw std::runtime_error("Village models require the shadow, sky and material pipelines.");
+        }
+        mGltfMaterials.emplace(gpu);
+        mGltfPipeline = BuildPipeline(gpu, format, shader.get(), layout, mShadowMap->SamplingLayout(),
+                                      mSky->Environment().Layout(), mGltfMaterials->Layout(), false, true);
+        LoadGltfProps(root);
     }
 
     mClearColor = {0.89, 0.925, 0.941, 1.0};
@@ -307,7 +326,8 @@ void WorldRenderer::SyncRoad(const HeightField& field, const RoadSpline& road) {
 //————————————————————————————————————————————————————————————————————————————————
 WorldRenderer::Drawable WorldRenderer::UploadMesh(std::span<const WorldVertex> vertices,
                                                    WGPUBindGroupLayout layout, const char* name) {
-    auto draw = MakeDrawBinding(layout);
+    Drawable draw;
+    if (layout) draw = MakeDrawBinding(layout);
     draw.count = static_cast<std::uint32_t>(vertices.size());
     const auto bytes = vertices.size_bytes();
     draw.vertices = MakeBuffer(mGpu.Device(), WGPUBufferUsage_Vertex, bytes, name);
@@ -336,19 +356,32 @@ WorldRenderer::Drawable WorldRenderer::MakeDrawBinding(WGPUBindGroupLayout layou
 //————————————————————————————————————————————————————————————————————————————————
 // 实例共用原型顶点缓冲，各自持有用于两条绘制通道的物体绑定。
 //————————————————————————————————————————————————————————————————————————————————
-void WorldRenderer::SyncProps(const std::vector<PlacedProp>& props) {
-    const std::array prototypes{&mRock, &mDraws[1], &mDraws[2], &mCabin};
-    while (mPropDraws.size() < props.size()) {
+void WorldRenderer::SyncProps(std::size_t count) {
+    while (mPropDraws.size() < count) {
         mPropDraws.push_back(MakeDrawBinding(mObjectLayout.get()));
     }
-    mPropDraws.resize(props.size());
-    for (std::size_t i = 0; i < props.size(); ++i) {
-        const auto& source = *prototypes[props[i].asset];
-        auto& draw = mPropDraws[i];
-        if (draw.vertices.get() != source.vertices.get()) {
-            wgpuBufferAddRef(source.vertices.get());
-            draw.vertices.reset(source.vertices.get());
-            draw.count = source.count;
+    mPropDraws.resize(count);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 按原型上传顶点与两张材质纹理，实例之间共享这些 GPU 资源。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::LoadGltfProps(const std::filesystem::path& root) {
+    for (std::size_t i = 0; i < mGltfProps.size(); ++i) {
+        const auto& asset = kPropAssets[i + kBuiltinPropCount];
+        const auto source = LoadGltfAsset(root / asset.id);
+        auto& prototype = mGltfProps[i];
+        for (const auto& material : source.materials) {
+            prototype.materials.push_back(mGltfMaterials->Upload(material));
+        }
+        for (const auto& primitive : source.primitives) {
+            std::vector<WorldVertex> vertices;
+            vertices.reserve(primitive.vertices.size());
+            for (const auto& vertex : primitive.vertices) {
+                vertices.push_back({vertex.geometry, 0.0f, vertex.uv});
+            }
+            auto mesh = UploadMesh(vertices, nullptr, asset.name);
+            prototype.meshes.push_back({std::move(mesh), primitive.material});
         }
     }
 }
@@ -384,7 +417,7 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
 void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size,
                            const WorldScene& scene) {
     ResizeDepth(size);
-    SyncProps(scene.props);
+    SyncProps(scene.props.size());
     if (mMaterials && scene.paint) {
         mMaterials->SyncPaint(mGpu.Queue(), *scene.paint);
     }
@@ -498,6 +531,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     if (renderShadow) {
         auto depthPass = mShadowMap->Begin(encoder);
         DrawObjects(depthPass.get(), visibleCount, showSpheres);
+        if (!showSpheres) DrawProps(depthPass.get(), scene.props, PropPass::Shadows);
         if (showVegetation) {
             wgpuRenderPassEncoderSetPipeline(depthPass.get(), mShadowMap->VegetationPipeline());
             wgpuRenderPassEncoderSetBindGroup(depthPass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
@@ -518,12 +552,17 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 3, mMaterials->Binding(), 0, nullptr);
     }
     DrawObjects(pass.get(), visibleCount, showSpheres);
+    if (!showSpheres) DrawProps(pass.get(), scene.props, PropPass::BuiltinColor);
     if (showRoad) {
         // 路面接收地形和地标的阴影；薄路面本身只在颜色通道绘制。
         DrawMesh(pass.get(), *mRoadMesh);
     }
     if (showBorders) {
         DrawMesh(pass.get(), *mChunkBorders);
+    }
+    if (!showSpheres && mGltfPipeline) {
+        wgpuRenderPassEncoderSetPipeline(pass.get(), mGltfPipeline.get());
+        DrawProps(pass.get(), scene.props, PropPass::GltfColor);
     }
     if (showVegetation) {
         wgpuRenderPassEncoderSetPipeline(pass.get(), mVegetationPipeline.get());
@@ -557,8 +596,28 @@ void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleC
                 DrawMesh(pass, limb);
             }
         }
-        for (const auto& prop : mPropDraws) {
-            DrawMesh(pass, prop);
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 根据原型选择几何，深度通道只读顶点和实例变换。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::DrawProps(WGPURenderPassEncoder pass, const std::vector<PlacedProp>& props,
+                              PropPass type) const {
+    const std::array builtins{&mRock, &mDraws[1], &mDraws[2], &mCabin};
+    for (std::size_t i = 0; i < props.size(); ++i) {
+        const auto asset = props[i].asset;
+        const auto instance = mPropDraws[i].binding.get();
+        if (asset < kBuiltinPropCount) {
+            if (type != PropPass::GltfColor) DrawMesh(pass, *builtins[asset], instance);
+        } else if (type != PropPass::BuiltinColor) {
+            const auto& prototype = mGltfProps[asset - kBuiltinPropCount];
+            for (const auto& draw : prototype.meshes) {
+                if (type == PropPass::GltfColor) {
+                    wgpuRenderPassEncoderSetBindGroup(pass, 3, prototype.materials[draw.material].get(), 0, nullptr);
+                }
+                DrawMesh(pass, draw.mesh, instance);
+            }
         }
     }
 }
@@ -566,8 +625,8 @@ void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleC
 //————————————————————————————————————————————————————————————————————————————————
 // 提交与一个对象或地形块对应的三角形列表。
 //————————————————————————————————————————————————————————————————————————————————
-void WorldRenderer::DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh) {
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, mesh.binding.get(), 0, nullptr);
+void WorldRenderer::DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh, WGPUBindGroup instance) {
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, instance ? instance : mesh.binding.get(), 0, nullptr);
     wgpuRenderPassEncoderSetVertexBuffer(pass, 0, mesh.vertices.get(), 0, mesh.count * sizeof(WorldVertex));
     wgpuRenderPassEncoderDraw(pass, mesh.count, 1, 0, 0);
 }

@@ -71,8 +71,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Meadow;
             } else if (value == "12") {
                 options.chapter = tinyworld::Chapter::Ecology;
+            } else if (value == "13") {
+                options.chapter = tinyworld::Chapter::Village;
             } else {
-                std::cerr << "Choose chapter 01 through 12.\n";
+                std::cerr << "Choose chapter 01 through 13.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -123,7 +125,7 @@ int main(int argc, char** argv) {
                 }
             }
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..12] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..13] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"

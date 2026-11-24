@@ -1,9 +1,12 @@
 #pragma once
 
 #include "Engine/Scene/OrbitCamera.h"
+#include "Engine/Scene/PlacedProp.h"
 #include "Engine/Scene/Transform.h"
 
 #include <glm/vec2.hpp>
+
+#include <span>
 
 namespace tinyworld {
 
@@ -21,7 +24,8 @@ struct WalkSpawn {
     //————————————————————————————————————————————————————————————————————————————————
     // 将地面上的落脚点和朝向转换成世界空间的直立角色变换。
     //————————————————————————————————————————————————————————————————————————————————
-    [[nodiscard]] Transform WorldPose(const Transform& ground, const HeightField* terrain = nullptr) const;
+    [[nodiscard]] Transform WorldPose(const Transform& ground, const HeightField* terrain = nullptr,
+                                      std::span<const PlacedProp> props = {}) const;
 };
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -47,13 +51,14 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     // 拷贝出生点成为运行时状态，并计算第一帧的角色与相机。
     //————————————————————————————————————————————————————————————————————————————————
-    WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain = nullptr);
+    WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain = nullptr,
+                   std::span<const PlacedProp> props = {});
 
     //————————————————————————————————————————————————————————————————————————————————
     // 累积本帧秒数，执行完整的模拟步。reset 会清空剩余时间。
     //————————————————————————————————————————————————————————————————————————————————
     void Update(const WalkSpawn& spawn, const Transform& ground, WalkInput input, double deltaSeconds,
-                const HeightField* terrain = nullptr);
+                const HeightField* terrain = nullptr, std::span<const PlacedProp> props = {});
 
     //————————————————————————————————————————————————————————————————————————————————
     // 返回可直接用于角色模型矩阵的脚底变换。
@@ -74,6 +79,7 @@ private:
 
     WalkSpawn mFeet;        // 当前脚底 XZ 和朝向，与出生点采用同一坐标空间
     double mRemaining{};   // 尚未凑满一个时间步的秒数
+    float mFeetHeight{};   // 地形场景的步进脚底 Y，单位为米
     Transform mPose;        // 供渲染器使用的世界脚底变换
     WalkGait mGait;
     OrbitCamera mCamera;    // 独立于编辑和驾驶相机的第三人称相机
