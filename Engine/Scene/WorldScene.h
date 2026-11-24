@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Engine/Scene/OrbitCamera.h"
+#include "Engine/Scene/PlacedProp.h"
 #include "Engine/Scene/RoamingCar.h"
 #include "Engine/Scene/Transform.h"
 #include "Engine/Terrain/HeightField.h"
 #include "Engine/Terrain/MaterialSplat.h"
 #include "Engine/Terrain/RoadSpline.h"
+#include "Engine/Terrain/Vegetation.h"
 #include "Runtime/WalkController.h"
 
 #include <array>
@@ -94,6 +96,9 @@ struct WorldScene {
     std::optional<MaterialPreview> materials;  // 第八章的地表材质观察选项
     std::optional<MaterialSplat> paint;  // 第八章的共享 RGBA 权重图
     std::optional<RoadSpline> road;  // 第九章保存道路控制点与宽度
+    bool canPlaceProps{};  // 第十章启用物体摆放
+    std::vector<PlacedProp> props;
+    std::optional<VegetationSettings> vegetation;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 借用可选的高度场。只在本次地面查询或网格生成期间使用。
@@ -149,6 +154,7 @@ struct WorldScene {
     // 编辑时返回出生预览，步行时返回当前脚底变换。仅在 spawn 有值时调用。
     //————————————————————————————————————————————————————————————————————————————————
     [[nodiscard]] Transform WalkerPose() const;
+    [[nodiscard]] WalkGait WalkerGait() const { return mWalker ? mWalker->Gait() : WalkGait{}; }
 
     //————————————————————————————————————————————————————————————————————————————————
     // 返回当前模式使用的相机。
@@ -156,6 +162,7 @@ struct WorldScene {
     [[nodiscard]] const OrbitCamera& ActiveCamera() const;
 
 private:
+    void UpdateGroundedObjects(const HeightField& previous);
     std::optional<RoamingCar> mCar;  // 仅在漫游模式下保存驾驶和跟随状态
     std::optional<Transform> mParkedCar;  // 第五章进入驾驶前的编辑变换
     std::optional<WalkController> mWalker;  // 仅在步行检查中存在，退出即丢弃

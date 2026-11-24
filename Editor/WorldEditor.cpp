@@ -1,5 +1,6 @@
 #include "Editor/WorldEditor.h"
 
+#include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Scene/SceneFile.h"
 #include "Engine/Terrain/TerrainMesh.h"
 
@@ -12,12 +13,34 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string_view>
 
 namespace tinyworld {
 namespace {
+
+constexpr std::array kSculptLabels{"Raise", "Lower", "Smooth", "Flatten"};
+
+//————————————————————————————————————————————————————————————————————————————————
+// 在场景图片内用同一套投影提交局部手柄。选中项的 ID 区分不同的操作目标。
+//————————————————————————————————————————————————————————————————————————————————
+bool ManipulateLocal(const OrbitCamera& camera, PixelSize size, ImGuizmo::OPERATION operation,
+                     std::size_t id, glm::mat4& model) {
+    const auto low = ImGui::GetItemRectMin();
+    const auto high = ImGui::GetItemRectMax();
+    const auto view = camera.View();
+    const auto projection = camera.Projection(static_cast<float>(size.width) / size.height, false);
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+    ImGuizmo::SetRect(low.x, low.y, high.x - low.x, high.y - low.y);
+    ImGuizmo::PushID(static_cast<int>(id));
+    const bool changed = ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(projection), operation,
+                                             ImGuizmo::LOCAL, glm::value_ptr(model));
+    ImGuizmo::PopID();
+    return changed;
+}
 
 //————————————————————————————————————————————————————————————————————————————————
 // 从 ImGui 图片坐标构造世界射线，WebGPU 的裁剪深度从 0 到 1。
@@ -78,15 +101,19 @@ void BrushOutline(const HeightField& field, glm::vec2 center, float radius, bool
 //————————————————————————————————————————————————————————————————————————————————
 // 场景路径以 UTF-8 交给 ImGui。省略路径时使用工作目录中的默认文件名。
 //————————————————————————————————————————————————————————————————————————————————
-WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt)
-    : mScene(scene), mSculptEnabled(sculpt && scene.canSculpt) {
+WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt,
+                         MaterialPreviews previews, const VegetationDrawStats* vegetationStats)
+    : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mSculptEnabled(sculpt && scene.canSculpt) {
     if (mScene.shadows) {
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.road ? kRoadPanel : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
+        mSelected = mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
+            : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
-            ? std::u8string{mScene.road ? u8"valley-ch09.json"
+            ? std::u8string{mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
+                                                ? u8"valley-ch12.json" : u8"valley-ch11.json")
+                : mScene.canPlaceProps ? u8"valley-ch10.json" : mScene.road ? u8"valley-ch09.json"
                 : mScene.canSculpt ? u8"valley-ch07.json" : u8"scene-ch05.json"}
             : scenePath.u8string();
         if (text.size() < mScenePath.size()) {
@@ -110,25 +137,26 @@ void WorldEditor::DrawToolbar() {
     const bool shortcut = ImGui::IsWindowFocused() && io.KeyCtrl && !io.WantTextInput &&
                           !ImGui::IsAnyItemActive() && !mScene.IsWalking();
     if (ImGui::Button("Inspect")) {
-        mSculptEnabled = false;
-        mMaterialPaint = false;
+        SelectForEditing(mSelected);
     }
-    constexpr std::array labels{"Raise", "Lower", "Smooth", "Flatten"};
-    for (std::size_t i = 0; i < labels.size(); ++i) {
+    for (std::size_t i = 0; i < kSculptLabels.size(); ++i) {
         ImGui::SameLine();
-        if (ImGui::Selectable(labels[i], mSculptEnabled && mBrush.mode == static_cast<BrushMode>(i),
-                              ImGuiSelectableFlags_None, {ImGui::CalcTextSize(labels[i]).x + 9.0f, 0.0f})) {
+        const auto mode = static_cast<BrushMode>(i);
+        const bool active = mSculptEnabled && mBrush.mode == mode;
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+        if (ImGui::Button(kSculptLabels[i])) {
             mSculptEnabled = true;
             mMaterialPaint = false;
-            mBrush.mode = static_cast<BrushMode>(i);
+            mPlacement.reset();
+            mBrush.mode = mode;
             if (mScene.materials) mScene.materials->spheres = false;
         }
+        if (active) ImGui::PopStyleColor();
     }
     if (mScene.paint) {
         ImGui::SameLine();
         if (ImGui::Button("Paint layers")) {
-            mSelected = kMaterialPanel;
-            mSculptEnabled = false;
+            SelectForEditing(kMaterialPanel);
             mMaterialPaint = true;
             mScene.materials->spheres = false;
             if (mScene.materials->view == MaterialView::VertexColor) mScene.materials->view = MaterialView::Lit;
@@ -189,28 +217,37 @@ void WorldEditor::DrawHierarchy() {
     if (!mScene.canSculpt || ImGui::TreeNodeEx("Valley objects", ImGuiTreeNodeFlags_DefaultOpen)) {
         for (std::size_t index = mScene.terrain ? 1 : 0; index < objectCount; ++index) {
             if (ImGui::Selectable(mScene.objects[index].name, mSelected == index)) {
-                mSelected = index;
-                mSculptEnabled = false;
-                mMaterialPaint = false;
+                SelectForEditing(index);
             }
         }
         if (mScene.canSculpt) ImGui::TreePop();
     }
     if (ImGui::Selectable("Sun", !mSelected)) {
-        mSelected.reset();
+        SelectForEditing(std::nullopt);
     }
     if (mScene.spawn && ImGui::Selectable("Spawn", mSelected == WorldScene::kObjectCount)) {
-        mSelected = WorldScene::kObjectCount;
+        SelectForEditing(WorldScene::kObjectCount);
     }
     if (mScene.materials && ImGui::Selectable("Materials", mSelected == kMaterialPanel)) {
-        mSelected = kMaterialPanel;
-        mSculptEnabled = false;
+        SelectForEditing(kMaterialPanel);
     }
     if (mScene.road && ImGui::Selectable("Road", mSelected == kRoadPanel)) {
-        mSelected = kRoadPanel;
-        mSculptEnabled = false;
-        mMaterialPaint = false;
-        mScene.materials->spheres = false;
+        SelectForEditing(kRoadPanel);
+    }
+    if (mScene.vegetation && ImGui::Selectable("Vegetation", mSelected == kVegetationPanel)) {
+        SelectForEditing(kVegetationPanel);
+    }
+    if (mScene.canPlaceProps) {
+        if (ImGui::Selectable("Place objects", mSelected == kPropsPanel)) {
+            SelectForEditing(kPropsPanel);
+        }
+        for (std::size_t i = 0; i < mScene.props.size(); ++i) {
+            const auto& prop = mScene.props[i];
+            const auto name = std::string(kPropAssets[prop.asset].name) + " " + std::to_string(i + 1);
+            if (ImGui::Selectable(name.c_str(), mSelected == kFirstProp + i)) {
+                SelectForEditing(kFirstProp + i);
+            }
+        }
     }
     ImGui::SeparatorText("Scene demos");
     if (ImGui::Button(mScene.canSculpt ? "Reset layout" : "Reset")) {
@@ -242,6 +279,7 @@ void WorldEditor::DrawHierarchy() {
                 if (ImGui::Checkbox("Sculpt terrain", &mSculptEnabled) && mSculptEnabled && mScene.materials) {
                     mScene.materials->spheres = false;
                     mMaterialPaint = false;
+                    mPlacement.reset();
                 }
             }
         } else {
@@ -251,6 +289,7 @@ void WorldEditor::DrawHierarchy() {
         if (ImGui::Button(walking ? "Stop walking" : "Walk from spawn")) {
             mScene.SetWalking(!walking);
             if (!walking) {
+                mPlacement.reset();
                 ImGui::SetWindowFocus("Scene Viewport");
             }
         }
@@ -267,6 +306,16 @@ void WorldEditor::DrawHierarchy() {
             environment->sky = SkyMode::Panorama;
         }
         ImGui::Checkbox("Car reflection", &environment->carReflection);
+    }
+}
+
+void WorldEditor::SelectForEditing(std::optional<std::size_t> selection) {
+    mSelected = selection;
+    mSculptEnabled = false;
+    mMaterialPaint = false;
+    mPlacement.reset();
+    if (mScene.materials && selection && *selection >= kRoadPanel) {
+        mScene.materials->spheres = false;
     }
 }
 
@@ -297,7 +346,8 @@ void WorldEditor::DrawSceneFileControls() {
                 mPainting = false;
                 mOrbiting = false;
                 mRoadPoint = 0;
-                mDraggingRoadPoint = false;
+                mPlacement.reset();
+                if (mSelected && *mSelected >= kFirstProp) mSelected = kPropsPanel;
                 mSceneStatus = "Scene opened.";
             }
         } catch (const std::exception& error) {
@@ -327,8 +377,10 @@ void WorldEditor::DrawInspector() {
             materials->spheres = false;
             if (materials->view == MaterialView::VertexColor) materials->view = MaterialView::Lit;
         }
+        if (mScene.paint && !materials->spheres) {
+            DrawMaterialPalette();
+        }
         if (mMaterialPaint) {
-            ImGui::Combo("Layer", &mMaterialBrush.layer, "R Grass\0G Gravel\0B Rock\0A Sand\0Erase\0");
             ImGui::Checkbox("Square brush", &mMaterialBrush.square);
             ImGui::SliderFloat("Radius (m)", &mMaterialBrush.radius, 0.5f, 6.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::SliderFloat("Strength", &mMaterialBrush.strength, 1.0f, 12.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
@@ -341,16 +393,16 @@ void WorldEditor::DrawInspector() {
         }
         return;
     }
+    if (mScene.vegetation && mSelected == kVegetationPanel && !mSculptEnabled) {
+        DrawVegetationInspector();
+        return;
+    }
     if (mScene.spawn && (mScene.IsDriving() || mScene.IsWalking())) {
         ImGui::TextWrapped("Stop the preview to edit the scene.");
         return;
     }
     if (mSculptEnabled) {
-        ImGui::SeparatorText("Terrain brush");
-        int mode = static_cast<int>(mBrush.mode);
-        if (ImGui::Combo("Mode", &mode, "Raise\0Lower\0Smooth\0Flatten\0")) {
-            mBrush.mode = static_cast<BrushMode>(mode);
-        }
+        ImGui::SeparatorText(kSculptLabels[static_cast<std::size_t>(mBrush.mode)]);
         ImGui::SliderFloat("Radius (m)", &mBrush.radius, 0.5f, 7.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Strength", &mBrush.strength, 0.1f, 6.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         if (mBrush.mode == BrushMode::Flatten) {
@@ -362,6 +414,10 @@ void WorldEditor::DrawInspector() {
     }
     if (mScene.road && mSelected == kRoadPanel) {
         DrawRoadInspector();
+        return;
+    }
+    if (mScene.canPlaceProps && mSelected == kPropsPanel) {
+        DrawPropsPalette();
         return;
     }
     if (mScene.spawn && mSelected == WorldScene::kObjectCount) {
@@ -394,12 +450,14 @@ void WorldEditor::DrawInspector() {
         return;
     }
 
-    auto& object = mScene.objects[*mSelected];
-    auto& transform = object.transform;
-    ImGui::SeparatorText(object.name);
+    const bool placed = *mSelected >= kFirstProp;
+    auto& transform = placed ? mScene.props[*mSelected - kFirstProp].transform : mScene.objects[*mSelected].transform;
+    ImGui::SeparatorText(placed ? kPropAssets[mScene.props[*mSelected - kFirstProp].asset].name
+                                : mScene.objects[*mSelected].name);
     ImGui::TextUnformatted("Position (m)");
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::DragFloat3("##position", glm::value_ptr(transform.position), 0.05f, -30.0f, 30.0f,
+    const float positionLimit = placed ? 100.0f : 30.0f;
+    ImGui::DragFloat3("##position", glm::value_ptr(transform.position), 0.05f, -positionLimit, positionLimit,
                       "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::TextUnformatted("Rotation (deg)");
     ImGui::SetNextItemWidth(-1.0f);
@@ -411,12 +469,141 @@ void WorldEditor::DrawInspector() {
     ImGui::DragFloat3("##scale", glm::value_ptr(transform.scale), 0.01f, 0.05f, 5.0f,
                       "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::SeparatorText("Gizmo");
-    if (ImGui::RadioButton("Move", !mRotate)) {
-        mRotate = false;
+    if (ImGui::RadioButton("Move", mGizmoMode == GizmoMode::Move)) {
+        mGizmoMode = GizmoMode::Move;
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton("Rotate", mRotate)) {
-        mRotate = true;
+    if (ImGui::RadioButton("Rotate", mGizmoMode == GizmoMode::Rotate)) {
+        mGizmoMode = GizmoMode::Rotate;
+    }
+    if (mScene.canPlaceProps) {
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale", mGizmoMode == GizmoMode::Scale)) {
+            mGizmoMode = GizmoMode::Scale;
+        }
+    }
+    if (placed && ImGui::Button("Remove object")) {
+        mScene.props.erase(mScene.props.begin() + static_cast<std::ptrdiff_t>(*mSelected - kFirstProp));
+        SelectForEditing(kPropsPanel);
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 切换提交策略以对照开销。第 12 章同时允许修改下一批实例的种子和密度。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::DrawVegetationInspector() {
+    auto& settings = *mScene.vegetation;
+    const bool rules = settings.mode == VegetationMode::TerrainRules;
+    ImGui::SeparatorText(rules ? "Terrain ecology" : "Meadow and treeline");
+    if (ImGui::Checkbox("Show vegetation", &settings.visible) && settings.visible && mScene.materials) {
+        mScene.materials->spheres = false;
+    }
+    ImGui::Checkbox("Instanced drawing", &settings.instanced);
+    if (rules) {
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.64f);
+        ImGui::InputScalar("Seed", ImGuiDataType_U32, &settings.seed, nullptr, nullptr, "%u",
+                           ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SliderFloat("Density", &settings.density, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    }
+    if (mVegetationStats) {
+        const auto& stats = *mVegetationStats;
+        ImGui::SeparatorText("Instances");
+        ImGui::Text("Grass %u  Trees %u", stats.instances[0], stats.instances[1]);
+        if (rules) ImGui::Text("Rocks %u", stats.instances[2]);
+        ImGui::SeparatorText("Vegetation draw calls");
+        ImGui::Text("Color %u   Shadow %u", stats.colorDraws, stats.shadowDraws);
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 以两行两列显示真实底色贴图，点选任一格立即启用对应权重的笔刷。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::DrawMaterialPalette() {
+    constexpr std::array labels{"Grass", "Gravel", "Rock", "Sand"};
+    const auto& style = ImGui::GetStyle();
+    const float cell = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
+    const float imageSide = std::clamp(cell - 2.0f * style.FramePadding.x, 18.0f, 64.0f);
+    const auto choose = [&](int layer) {
+        mMaterialBrush.layer = layer;
+        mMaterialPaint = true;
+        if (mScene.materials->view == MaterialView::VertexColor) {
+            mScene.materials->view = MaterialView::Lit;
+        }
+    };
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        if (i % 2 == 1) ImGui::SameLine();
+        ImGui::BeginGroup();
+        const bool selected = mMaterialPaint && mMaterialBrush.layer == static_cast<int>(i);
+        bool clicked = false;
+        if (const auto view = mPreviews[i]) {
+            const auto texture = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(view));
+            clicked = ImGui::ImageButton(labels[i], ImTextureRef{texture}, {imageSide, imageSide});
+        } else {
+            clicked = ImGui::Button(labels[i], {imageSide, imageSide});
+        }
+        if (selected) {
+            auto* list = ImGui::GetWindowDrawList();
+            list->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(101, 237, 212, 255),
+                          style.FrameRounding, 0, 2.5f);
+        }
+        if (clicked) choose(static_cast<int>(i));
+        ImGui::TextUnformatted(labels[i]);
+        ImGui::EndGroup();
+    }
+    if (ImGui::RadioButton("Erase weights", mMaterialPaint && mMaterialBrush.layer == 4)) {
+        choose(4);
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 选中资产后等待地形落点。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::DrawPropsPalette() {
+    ImGui::SeparatorText("Place objects");
+    const auto& style = ImGui::GetStyle();
+    const float width = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
+    ImGui::BeginDisabled(mScene.props.size() >= PlacedProp::kLimit);
+    for (std::size_t i = 0; i < kPropAssets.size(); ++i) {
+        if (i % 2 == 1) ImGui::SameLine();
+        const bool armed = mPlacement == i;
+        if (armed) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+        if (ImGui::Button(kPropAssets[i].name, {width, 0.0f})) {
+            mPlacement = i;
+            if (mScene.materials) mScene.materials->spheres = false;
+        }
+        if (armed) ImGui::PopStyleColor();
+    }
+    ImGui::EndDisabled();
+    if (mPlacement) {
+        ImGui::TextWrapped("Click terrain to place the %s. Esc cancels.", kPropAssets[*mPlacement].name);
+    } else if (mScene.props.size() >= PlacedProp::kLimit) {
+        ImGui::TextWrapped("Object limit reached. Remove an object to place another.");
+    } else {
+        ImGui::TextWrapped("Choose an object, then click the terrain.");
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 沿用笔刷的射线拾取放置物体，单击后转入新实例的变换编辑。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldEditor::DrawPropPlacement(PixelSize size) {
+    if (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        mPlacement.reset();
+        return;
+    }
+    if (mOrbiting || !ImGui::IsItemHovered()) return;
+    const auto low = ImGui::GetItemRectMin();
+    const auto high = ImGui::GetItemRectMax();
+    const auto& camera = mScene.camera;
+    const auto vp = camera.Projection(static_cast<float>(size.width) / size.height) * camera.View();
+    const auto& field = *mScene.terrain;
+    glm::vec3 hit;
+    if (!PickTerrain(field, vp, low, high, ImGui::GetIO().MousePos, hit)) return;
+    BrushOutline(field, {hit.x, hit.z}, 0.55f, false, vp, low, high);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && mScene.props.size() < PlacedProp::kLimit) {
+        mScene.props.push_back({*mPlacement, {hit}});
+        SelectForEditing(kFirstProp + mScene.props.size() - 1);
+        mGizmoMode = GizmoMode::Move;
     }
 }
 
@@ -436,7 +623,6 @@ void WorldEditor::DrawViewport(PixelSize size, float deltaSeconds) {
     if (driving || walking) {
         mOrbiting = false;
         mPainting = false;
-        mDraggingRoadPoint = false;
         mPaintDragging = false;
         UpdateRoam(deltaSeconds);
     } else if (!spheres) {
@@ -447,13 +633,16 @@ void WorldEditor::DrawViewport(PixelSize size, float deltaSeconds) {
             DrawMaterialBrush(size, deltaSeconds);
         } else if (editingRoad) {
             DrawRoadEditor(size);
+        } else if (mPlacement) {
+            DrawPropPlacement(size);
         }
     }
     const char* hint = spheres ? "Fixed material study   |   roughness 0.24 / 0.62 per pair"
         : walking ? "W/S: walk   A/D: turn   Arrows   R / Home: respawn"
         : driving ? "WASD / Arrows: drive   R / Home: reset"
-        : editingRoad ? "Drag road marker   Shift-click: insert after selection"
+        : editingRoad ? "Select a node and drag a local axis   Shift-click: insert"
         : paintingMaterial ? "Left drag: paint layer   Right drag: orbit"
+        : mPlacement ? "Click terrain to place   Esc: cancel"
         : mSculptEnabled ? "Left drag: sculpt   Right drag: orbit   Wheel: zoom" : "Right drag: orbit   Wheel: zoom";
     char terrainHint[160]{};
     if (mScene.terrain && !spheres) {
@@ -501,12 +690,10 @@ void WorldEditor::UpdateRoam(float deltaSeconds) {
 // 手柄使用与场景一致的视图与纵横比，只换用它所需的裁剪深度区间。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldEditor::DrawEditControls(PixelSize size) {
-    const ImVec2 low = ImGui::GetItemRectMin();
-    const ImVec2 high = ImGui::GetItemRectMax();
     const bool hovered = ImGui::IsItemHovered();
     auto& camera = mScene.camera;
     const auto& io = ImGui::GetIO();
-    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !ImGuizmo::IsUsing()) {
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !ImGuizmo::IsUsingAny()) {
         mOrbiting = true;
     }
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
@@ -517,30 +704,35 @@ void WorldEditor::DrawEditControls(PixelSize size) {
         const float minimumElevation = mScene.environment ? -35.0f : 10.0f;
         camera.elevation = std::clamp(camera.elevation + 0.25f * io.MouseDelta.y, minimumElevation, 80.0f);
     }
-    if (hovered && io.MouseWheel != 0.0f) {
+    if (hovered && io.MouseWheel != 0.0f && !ImGuizmo::IsUsingAny()) {
         const float maxDistance = mScene.terrain ? 65.0f : 33.0f;
         camera.distance = std::clamp(camera.distance * std::exp(-0.095f * io.MouseWheel), 5.0f, maxDistance);
     }
 
-    if (mSelected && *mSelected < mScene.objects.size() && !mOrbiting && !mSculptEnabled) {
-        auto& transform = mScene.objects[*mSelected].transform;
-        glm::mat4 model = transform.Matrix();
-        const glm::mat4 view = camera.View();
-        const glm::mat4 project = camera.Projection(static_cast<float>(size.width) / size.height, false);
-        ImGuizmo::SetOrthographic(false);
-        ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
-        ImGuizmo::SetRect(low.x, low.y, high.x - low.x, high.y - low.y);
-        const auto operation = mRotate ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
-        if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(project), operation,
-                                ImGuizmo::LOCAL, glm::value_ptr(model))) {
+    if (!mSelected || mOrbiting || mSculptEnabled || mPlacement) return;
+    const auto selection = *mSelected;
+    if (selection >= mScene.objects.size() && selection < kFirstProp) return;
+    auto& transform = selection >= kFirstProp ? mScene.props[selection - kFirstProp].transform
+                                              : mScene.objects[selection].transform;
+    auto model = transform.Matrix();
+    constexpr std::array operations{ImGuizmo::TRANSLATE, ImGuizmo::ROTATE, ImGuizmo::SCALE};
+    if (ManipulateLocal(camera, size, operations[static_cast<std::size_t>(mGizmoMode)], selection, model)) {
+        switch (mGizmoMode) {
+        case GizmoMode::Move:
             transform.position = glm::vec3(model[3]);
-            if (mRotate) {
-                // 旋转手柄只更新方向，独立保留 Inspector 中的三轴缩放。
-                const glm::mat3 rotation{glm::normalize(glm::vec3(model[0])),
-                                         glm::normalize(glm::vec3(model[1])),
-                                         glm::normalize(glm::vec3(model[2]))};
-                transform.rotationDegrees = glm::degrees(glm::eulerAngles(glm::quat_cast(rotation)));
+            break;
+        case GizmoMode::Rotate: {
+            const glm::mat3 rotation{glm::normalize(glm::vec3(model[0])),
+                                     glm::normalize(glm::vec3(model[1])),
+                                     glm::normalize(glm::vec3(model[2]))};
+            transform.rotationDegrees = glm::degrees(glm::eulerAngles(glm::quat_cast(rotation)));
+            break;
+        }
+        case GizmoMode::Scale:
+            for (int i = 0; i < 3; ++i) {
+                transform.scale[i] = std::clamp(glm::length(glm::vec3(model[i])), 0.05f, 5.0f);
             }
+            break;
         }
     }
 }
@@ -620,8 +812,13 @@ void WorldEditor::DrawRoadInspector() {
                          ImGuiSliderFlags_AlwaysClamp)) {
         mRoadPoint = static_cast<std::size_t>(selected - 1);
     }
-    ImGui::DragFloat2("World XZ (m)", glm::value_ptr(road.points[mRoadPoint]), 0.05f,
-                      -RoadSpline::kPointLimit, RoadSpline::kPointLimit, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    auto& point = road.points[mRoadPoint];
+    ImGui::DragFloat("World X (m)", &point.x, 0.05f, -RoadSpline::kPointLimit, RoadSpline::kPointLimit,
+                     "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat("Y offset (m)", &point.y, 0.05f, -RoadSpline::kHeightOffsetLimit, RoadSpline::kHeightOffsetLimit,
+                     "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat("World Z (m)", &point.z, 0.05f, -RoadSpline::kPointLimit, RoadSpline::kPointLimit,
+                     "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Width (m)", &road.width, RoadSpline::kMinimumWidth, RoadSpline::kMaximumWidth,
                        "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Avoidance margin (m)", &road.margin, 0.0f, RoadSpline::kMaximumMargin,
@@ -669,7 +866,7 @@ void WorldEditor::DrawRoadInspector() {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 点击屏幕上的圆点选择控制点，拖动时把地面命中的 XZ 写回道路。
+// 点击投影标记选择节点。局部 Z 沿路线，Y 始终竖直。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldEditor::DrawRoadEditor(PixelSize size) {
     auto& road = *mScene.road;
@@ -679,47 +876,11 @@ void WorldEditor::DrawRoadEditor(PixelSize size) {
     const auto& camera = mScene.camera;
     const auto vp = camera.Projection(static_cast<float>(size.width) / size.height) * camera.View();
     const auto mouse = ImGui::GetIO().MousePos;
-    const auto toScreen = [&](glm::vec2 p, ImVec2& marker) {
-        return ViewportPoint({p.x, field.HeightAt(p) + 0.12f, p.y}, vp, low, high, marker);
+    mRoadPoint = std::min(mRoadPoint, road.points.size() - 1);
+    const auto toWorld = [&](glm::vec3 p) {
+        return p + glm::vec3{0.0f, field.HeightAt({p.x, p.z}) + 0.12f, 0.0f};
     };
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) || mOrbiting) {
-        mDraggingRoadPoint = false;
-    }
-    const bool canEdit = ImGui::IsItemHovered() && !mOrbiting;
-    if (canEdit && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        mDraggingRoadPoint = false;
-        if (ImGui::GetIO().KeyShift) {
-            glm::vec3 hit;
-            if (road.points.size() < RoadSpline::kMaxPoints && PickTerrain(field, vp, low, high, mouse, hit)) {
-                const auto point = glm::clamp(glm::vec2{hit.x, hit.z}, -RoadSpline::kPointLimit, RoadSpline::kPointLimit);
-                ++mRoadPoint;
-                if (road.junctionPoint >= mRoadPoint) ++road.junctionPoint;
-                road.points.insert(road.points.begin() + static_cast<std::ptrdiff_t>(mRoadPoint), point);
-                road.junctionPoint = std::min(road.junctionPoint, road.points.size() - 1);
-            }
-        } else {
-            float closest = 13.0f * 13.0f;
-            for (std::size_t i = 0; i < road.points.size(); ++i) {
-                ImVec2 point;
-                if (toScreen(road.points[i], point)) {
-                    const float dx = point.x - mouse.x;
-                    const float dy = point.y - mouse.y;
-                    const float distance = dx * dx + dy * dy;
-                    if (distance < closest) {
-                        closest = distance;
-                        mRoadPoint = i;
-                        mDraggingRoadPoint = true;
-                    }
-                }
-            }
-        }
-    }
-    if (canEdit && mDraggingRoadPoint && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-        glm::vec3 hit;
-        if (PickTerrain(field, vp, low, high, mouse, hit)) {
-            road.points[mRoadPoint] = glm::clamp(glm::vec2{hit.x, hit.z}, -RoadSpline::kPointLimit, RoadSpline::kPointLimit);
-        }
-    }
+    const auto toScreen = [&](glm::vec3 p, ImVec2& marker) { return ViewportPoint(toWorld(p), vp, low, high, marker); };
     auto* list = ImGui::GetWindowDrawList();
     for (const auto& path : {road.Centerline(), road.Branch()}) {
         ImVec2 last{};
@@ -740,6 +901,52 @@ void WorldEditor::DrawRoadEditor(PixelSize size) {
             const ImU32 color = i == mRoadPoint ? IM_COL32(255, 205, 70, 255) : IM_COL32(223, 245, 247, 255);
             list->AddCircleFilled(marker, 5.5f, color);
             list->AddCircle(marker, 6.0f, IM_COL32(39, 57, 60, 255), 0, 2.0f);
+        }
+    }
+    if (mOrbiting) return;
+
+    const auto& io = ImGui::GetIO();
+    const bool clicked = ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    if (clicked && io.KeyShift && !ImGuizmo::IsUsingAny()) {
+        glm::vec3 hit;
+        if (road.points.size() < RoadSpline::kMaxPoints && PickTerrain(field, vp, low, high, mouse, hit)) {
+            const auto xz = glm::clamp(glm::vec2{hit.x, hit.z}, -RoadSpline::kPointLimit, RoadSpline::kPointLimit);
+            ++mRoadPoint;
+            if (road.junctionPoint >= mRoadPoint) ++road.junctionPoint;
+            road.points.insert(road.points.begin() + static_cast<std::ptrdiff_t>(mRoadPoint), {xz.x, 0.0f, xz.y});
+            road.junctionPoint = std::min(road.junctionPoint, road.points.size() - 1);
+        }
+        return;
+    }
+
+    auto& selected = road.points[mRoadPoint];
+    if (!ImGuizmo::IsUsingAny()) {
+        const auto tangent = road.points[std::min(mRoadPoint + 1, road.points.size() - 1)] -
+                             road.points[mRoadPoint == 0 ? 0 : mRoadPoint - 1];
+        mRoadHeading = std::hypot(tangent.x, tangent.z) > 0.0001f
+            ? glm::degrees(std::atan2(tangent.x, tangent.z)) : 0.0f;
+    }
+    const auto origin = toWorld(selected);
+    auto model = Transform{origin, {0.0f, mRoadHeading, 0.0f}}.Matrix();
+    if (ManipulateLocal(camera, size, ImGuizmo::TRANSLATE, kRoadPanel, model)) {
+        const auto delta = glm::vec3(model[3]) - origin;
+        const glm::vec3 limit{RoadSpline::kPointLimit, RoadSpline::kHeightOffsetLimit, RoadSpline::kPointLimit};
+        // 横向拖动只改 XZ。地面在新位置的高度由地形重新求得。
+        selected = glm::clamp(selected + delta, -limit, limit);
+    }
+    if (clicked && ImGuizmo::GetHoveredHandleType() == ImGuizmo::MT_NONE && !ImGuizmo::IsUsingAny()) {
+        float closest = 13.0f * 13.0f;
+        for (std::size_t i = 0; i < road.points.size(); ++i) {
+            ImVec2 marker{};
+            if (toScreen(road.points[i], marker)) {
+                const float dx = marker.x - mouse.x;
+                const float dy = marker.y - mouse.y;
+                const float distance = dx * dx + dy * dy;
+                if (distance < closest) {
+                    closest = distance;
+                    mRoadPoint = i;
+                }
+            }
         }
     }
 }

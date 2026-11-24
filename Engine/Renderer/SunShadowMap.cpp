@@ -1,5 +1,6 @@
 #include "Engine/Renderer/SunShadowMap.h"
 
+#include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Renderer/WebGpuContext.h"
 #include "Engine/Renderer/WorldVertex.h"
 
@@ -21,7 +22,8 @@ constexpr std::uint32_t kShadowSize = 1024;
 //————————————————————————————————————————————————————————————————————————————————
 // 只声明位置属性。深度图使用与颜色通道相同的顶点缓冲和物体 uniform。
 //————————————————————————————————————————————————————————————————————————————————
-PipelineHandle BuildDepthPipeline(WebGpuContext& gpu, WGPUShaderModule shader, WGPUBindGroupLayout objectLayout) {
+PipelineHandle BuildDepthPipeline(WebGpuContext& gpu, WGPUShaderModule shader, WGPUBindGroupLayout objectLayout,
+                                  bool vegetation) {
     WGPUPipelineLayoutDescriptor layoutDescription = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
     layoutDescription.bindGroupLayoutCount = 1;
     layoutDescription.bindGroupLayouts = &objectLayout;
@@ -52,6 +54,13 @@ PipelineHandle BuildDepthPipeline(WebGpuContext& gpu, WGPUShaderModule shader, W
     description.vertex.bufferCount = 1;
     description.vertex.buffers = &vertices;
     description.primitive.cullMode = WGPUCullMode_Back;
+    const VegetationVertexLayout vegetationLayout;
+    if (vegetation) {
+        description.label = {"Vegetation sun depth pipeline", WGPU_STRLEN};
+        description.vertex.entryPoint = {"vsVegetationDepth", WGPU_STRLEN};
+        description.vertex.bufferCount = vegetationLayout.buffers.size();
+        description.vertex.buffers = vegetationLayout.buffers.data();
+    }
     description.depthStencil = &depth;
     return PipelineHandle(wgpuDeviceCreateRenderPipeline(gpu.Device(), &description));
 }
@@ -61,7 +70,8 @@ PipelineHandle BuildDepthPipeline(WebGpuContext& gpu, WGPUShaderModule shader, W
 //————————————————————————————————————————————————————————————————————————————————
 // 深度纹理在太阳通道中写入，在之后的颜色通道中作为比较采样的输入。
 //————————————————————————————————————————————————————————————————————————————————
-SunShadowMap::SunShadowMap(WebGpuContext& gpu, WGPUShaderModule shader, WGPUBindGroupLayout objectLayout) {
+SunShadowMap::SunShadowMap(WebGpuContext& gpu, WGPUShaderModule shader, WGPUBindGroupLayout objectLayout,
+                           bool vegetation) {
     wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
     WGPUTextureDescriptor texture = WGPU_TEXTURE_DESCRIPTOR_INIT;
     texture.label = {"Chapter 03 shadow map", WGPU_STRLEN};
@@ -107,9 +117,10 @@ SunShadowMap::SunShadowMap(WebGpuContext& gpu, WGPUShaderModule shader, WGPUBind
     sampling.entries = bindings.data();
     wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
     mSamplingBinding.reset(wgpuDeviceCreateBindGroup(gpu.Device(), &sampling));
-    mDepthPipeline = BuildDepthPipeline(gpu, shader, objectLayout);
+    mDepthPipeline = BuildDepthPipeline(gpu, shader, objectLayout, false);
+    if (vegetation) mVegetationPipeline = BuildDepthPipeline(gpu, shader, objectLayout, true);
     gpu.CheckValidation("chapter 03 shadow binding and depth pipeline");
-    if (!mSamplingBinding || !mDepthPipeline) {
+    if (!mSamplingBinding || !mDepthPipeline || (vegetation && !mVegetationPipeline)) {
         throw std::runtime_error("Cannot bind the sun shadow map or create its depth pipeline");
     }
 }

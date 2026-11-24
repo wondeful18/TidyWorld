@@ -28,12 +28,12 @@ class HeightField {
 public:
     static constexpr float kSpacing = 0.5f;  // 两个整数样点之间的米数
     static constexpr int kCellsPerChunk = 16;  // 每个块每轴的单元格数
-    static constexpr int kFirstChunk = -2;  // X、Z 方向最小块键
-    static constexpr int kEndChunk = 2;  // X、Z 方向块键的上界，开区间
+    static constexpr int kFirstChunk = -3;  // X、Z 方向最小块键
+    static constexpr int kEndChunk = 3;  // X、Z 方向块键的上界，开区间
     static constexpr float kChunkSize = kCellsPerChunk * kSpacing;  // 块边长，单位为米
     static constexpr int kFirstSample = kFirstChunk * kCellsPerChunk;  // 首个全局样点，包含
     static constexpr int kLastSample = kEndChunk * kCellsPerChunk;  // 末端共边样点，包含
-    static constexpr float kHalfExtent = kLastSample * kSpacing;  // 地形从 -16 m 延伸到 +16 m
+    static constexpr float kHalfExtent = kLastSample * kSpacing;  // 地形从 -24 m 延伸到 +24 m
     static constexpr float kWalkLimit = kHalfExtent - 0.35f;  // 给角色脚掌留出边缘余量
     static constexpr int kSampleCount = kLastSample - kFirstSample + 1;  // 含左右端点的每轴样点数
     static constexpr std::size_t kChunkCount = (kEndChunk - kFirstChunk) * (kEndChunk - kFirstChunk);  // 样区块数

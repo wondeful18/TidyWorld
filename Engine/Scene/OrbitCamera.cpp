@@ -4,6 +4,7 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace tinyworld {
@@ -31,8 +32,9 @@ glm::mat4 OrbitCamera::View() const {
 //————————————————————————————————————————————————————————————————————————————————
 glm::mat4 OrbitCamera::Projection(float aspect, bool zeroToOne) const {
     const float fov = glm::radians(43.0f);
-    return zeroToOne ? glm::perspectiveRH_ZO(fov, aspect, 0.1f, 80.0f)
-                     : glm::perspectiveRH_NO(fov, aspect, 0.1f, 80.0f);
+    const float farPlane = std::max(80.0f, distance + 44.0f);
+    return zeroToOne ? glm::perspectiveRH_ZO(fov, aspect, 0.1f, farPlane)
+                     : glm::perspectiveRH_NO(fov, aspect, 0.1f, farPlane);
 }
 
 }  // namespace tinyworld

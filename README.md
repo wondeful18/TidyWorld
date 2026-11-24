@@ -1,6 +1,6 @@
 # TinyWorld
 
-Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01–09 章。
+Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。当前可运行第 01–12 章。
 
 ![第二章场景的 GPU 回读画面，草地上有一间小屋和一棵树](Chapters/ch02/image/scene.png)
 
@@ -17,6 +17,9 @@ Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索�
 | 07 | 雕刻山脊与河谷 | [教程与山谷存档](Chapters/ch07/README.md) | [第 07 章](Chapters/ch07/ch07.pdf) |
 | 08 | 地表材质与 PBR | [教程与材质对照](Chapters/ch08/README.md) | [第 08 章](Chapters/ch08/ch08.pdf) |
 | 09 | 顺着山势铺路 | [教程与避让遮罩](Chapters/ch09/README.md) | [第 09 章](Chapters/ch09/ch09.pdf) |
+| 10 | 在山谷里摆放场景物体 | [教程与三轴手柄](Chapters/ch10/README.md) | [第 10 章](Chapters/ch10/ch10.pdf) |
+| 11 | 草地、林缘与实例化 | [教程与实例化对照](Chapters/ch11/README.md) | [第 11 章](Chapters/ch11/ch11.pdf) |
+| 12 | 按地形规则生成生态 | [教程与道路避让](Chapters/ch12/README.md) | [第 12 章](Chapters/ch12/ch12.pdf) |
 
 [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
@@ -36,6 +39,9 @@ out/build/macos-arm64-debug/bin/TinyWorld --chapter 06
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 07
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 08
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 09
+out/build/macos-arm64-debug/bin/TinyWorld --chapter 10
+out/build/macos-arm64-debug/bin/TinyWorld --chapter 11
+out/build/macos-arm64-debug/bin/TinyWorld --chapter 12
 ```
 
 第 01 章加 `--direct` 可直接呈现三角形。第 02 章在场景视口内右键拖动可环绕，滚轮可缩放。任一章节加 `--capture output.ppm` 可读取 GPU 绘制结果。

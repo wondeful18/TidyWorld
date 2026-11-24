@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Engine/Terrain/HeightField.h"
+
 #include <glm/vec2.hpp>
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace tinyworld {
 
@@ -22,9 +25,9 @@ struct MaterialBrush {
 //————————————————————————————————————————————————————————————————————————————————
 class MaterialSplat {
 public:
-    static constexpr int kSide = 128;  // 样区每轴像素数
+    static constexpr int kSide = static_cast<int>(2.0f * HeightField::kHalfExtent / 0.25f);
     using Pixel = std::array<std::uint8_t, 4>;
-    using Pixels = std::array<Pixel, kSide * kSide>;
+    using Pixels = std::vector<Pixel>;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 笔刷同时重分配四个通道，每个像素的总和保持不超过 255。
@@ -43,7 +46,7 @@ public:
     [[nodiscard]] std::uint64_t Revision() const { return mRevision; }
 
 private:
-    Pixels mPixels{};  // 线性 RGBA，四个通道总和不超过 255
+    Pixels mPixels = Pixels(kSide * kSide);  // 线性 RGBA，四个通道总和不超过 255
     std::uint64_t mRevision{};  // 绘制或重开时替换的修订号
 };
 

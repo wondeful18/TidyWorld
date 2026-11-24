@@ -10,7 +10,7 @@ struct DrawUniform {
     lightViewProjection: mat4x4<f32>,  // 从世界到太阳裁剪坐标
     shadowControls: vec4<f32>,    // 阴影开关、PCF 开关、深度偏移、保留槽
     cameraAndReflection: vec4<f32>, // xyz 为相机世界位置，w 为车身反射开关
-    material: vec4<f32>,            // 类别、诊断通道或金属度、粗糙度、保留
+    material: vec4<f32>,            // 类别与对应参数，地形的 w 为世界边长
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawUniform;
@@ -280,7 +280,7 @@ fn shadeMaterials(input: VertexOutput) -> vec3<f32> {
     }
     let automatic = vec4<f32>(surfaceWeights(input.worldPosition, normalize(input.normal)), 0.0);
     let halfTexel = 0.5 / vec2<f32>(textureDimensions(terrainSplat));
-    let weightUV = clamp(input.worldPosition.xz / 32.0 + 0.5, halfTexel, vec2<f32>(1.0) - halfTexel);
+    let weightUV = clamp(input.worldPosition.xz / draw.material.w + 0.5, halfTexel, vec2<f32>(1.0) - halfTexel);
     let painted = textureSample(terrainSplat, surfaceSampler, weightUV);
     let weights = painted + automatic * max(0.0, 1.0 - dot(painted, vec4<f32>(1.0)));
     if (draw.material.y == 1.0) {
@@ -313,4 +313,73 @@ fn fsMaterialsLinear(input: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fsMaterialsDisplay(input: VertexOutput) -> @location(0) vec4<f32> {
     return encodeDisplay(shadeMaterials(input));
+}
+
+struct VegetationOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) color: vec3<f32>,
+    @location(2) lightClip: vec4<f32>,
+    @location(3) cardUv: vec2<f32>,
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 实例记录保存 Y 轴旋转的 cos 和 sin，法线沿用同一旋转。
+//————————————————————————————————————————————————————————————————————————————————
+fn vegetationRotate(v: vec3<f32>, facing: vec2<f32>) -> vec3<f32> {
+    return vec3<f32>(facing.x * v.x + facing.y * v.z, v.y, facing.x * v.z - facing.y * v.x);
+}
+
+@vertex
+fn vsVegetation(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>,
+                @location(2) color: vec3<f32>, @location(3) uv: vec2<f32>,
+                @location(4) positionScale: vec4<f32>, @location(5) facingShade: vec4<f32>) -> VegetationOutput {
+    let world = vec4<f32>(positionScale.xyz + vegetationRotate(position, facingShade.xy) * positionScale.w, 1.0);
+    return VegetationOutput(draw.viewProjection * world, vegetationRotate(normal, facingShade.xy),
+                            color * facingShade.z, draw.lightViewProjection * world, uv);
+}
+
+@vertex
+fn vsVegetationDepth(@location(0) position: vec3<f32>, @location(4) positionScale: vec4<f32>,
+                     @location(5) facingShade: vec4<f32>) -> @builtin(position) vec4<f32> {
+    let world = positionScale.xyz + vegetationRotate(position, facingShade.xy) * positionScale.w;
+    return draw.lightViewProjection * vec4<f32>(world, 1.0);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 算出卡片上某片叶子的覆盖率，沿高度从略宽的根部渐细到叶尖。
+//————————————————————————————————————————————————————————————————————————————————
+fn grassBlade(uv: vec2<f32>, root: f32, tip: f32, height: f32, width: f32) -> f32 {
+    let y = clamp(uv.y / height, 0.0, 1.0);
+    let center = mix(root, tip, y * y);
+    let halfWidth = width * (1.0 - y * 0.93);
+    return (1.0 - smoothstep(halfWidth * 0.55, halfWidth, abs(uv.x - center))) * (1.0 - step(height, uv.y));
+}
+
+fn shadeVegetation(in: VegetationOutput) -> vec3<f32> {
+    if (in.cardUv.x >= 0.0) {
+        let uv = in.cardUv;
+        let alpha = max(max(grassBlade(uv, 0.42, 0.13, 0.68, 0.083),
+                            grassBlade(uv, 0.49, 0.40, 0.98, 0.106)),
+                        max(grassBlade(uv, 0.56, 0.86, 0.82, 0.099),
+                            grassBlade(uv, 0.57, 0.96, 0.55, 0.058)));
+        if (alpha < 0.50) {
+            discard;
+        }
+    }
+    var light: VertexOutput;
+    light.normal = in.normal;
+    light.color = in.color;
+    light.lightClip = in.lightClip;
+    return shade(light, sunVisibility(light));
+}
+
+@fragment
+fn fsVegetationLinear(in: VegetationOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(shadeVegetation(in), 1.0);
+}
+
+@fragment
+fn fsVegetationDisplay(in: VegetationOutput) -> @location(0) vec4<f32> {
+    return encodeDisplay(shadeVegetation(in));
 }

@@ -31,6 +31,8 @@ int main(int argc, char** argv) {
             options.direct = true;
         } else if (argument == "--smoke-test") {
             options.smokeTest = true;
+        } else if (argument == "--benchmark-vegetation") {
+            options.benchmarkVegetation = true;
         } else if (argument == "--chunk-borders") {
             options.chunkBorders = true;
         } else if (argument == "--lod-preview") {
@@ -63,8 +65,14 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Materials;
             } else if (value == "09") {
                 options.chapter = tinyworld::Chapter::Road;
+            } else if (value == "10") {
+                options.chapter = tinyworld::Chapter::Props;
+            } else if (value == "11") {
+                options.chapter = tinyworld::Chapter::Meadow;
+            } else if (value == "12") {
+                options.chapter = tinyworld::Chapter::Ecology;
             } else {
-                std::cerr << "Choose chapter 01 through 09.\n";
+                std::cerr << "Choose chapter 01 through 12.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -115,7 +123,7 @@ int main(int argc, char** argv) {
                 }
             }
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..09] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..12] [--preset overlap|evening|drive|walk|materials] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -124,7 +132,8 @@ int main(int argc, char** argv) {
                          "Chapter 06: [--lod-preview]\n"
                          "Chapter 07+: [--scene valley.json] [--sculpt-tools]\n"
                          "Chapter 08+: [--preset materials]\n"
-                         "Chapter 09: [--export-road-mask output.pgm]\n";
+                         "Chapter 09+: [--export-road-mask output.pgm]\n"
+                         "Chapter 11+: [--benchmark-vegetation]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -136,8 +145,14 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     if (!options.roadMaskPath.empty() &&
-        (options.chapter != tinyworld::Chapter::Road || options.smokeTest || !options.capturePath.empty())) {
-        std::cerr << "Export a road mask with chapter 09 in a separate command.\n";
+        (options.chapter < tinyworld::Chapter::Road || options.smokeTest || !options.capturePath.empty())) {
+        std::cerr << "Export a road mask with chapter 09 or later in a separate command.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.benchmarkVegetation &&
+        (options.chapter < tinyworld::Chapter::Meadow || options.smokeTest || !options.capturePath.empty() ||
+         !options.roadMaskPath.empty() || options.worldPreset == tinyworld::WorldPreset::Materials)) {
+        std::cerr << "Run the vegetation benchmark separately with chapter 11 or 12 and a terrain view.\n";
         return EXIT_FAILURE;
     }
     if (options.chapter == tinyworld::Chapter::Triangle && options.worldPreset != tinyworld::WorldPreset::Default) {

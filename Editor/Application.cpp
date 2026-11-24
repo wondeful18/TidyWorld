@@ -14,8 +14,12 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <webgpu/wgpu.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdio>
 #include <optional>
 #include <stdexcept>
 #include <variant>
@@ -62,10 +66,18 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
     if (options.chapter >= Chapter::Road) {
         scene.road.emplace();
     }
+    scene.canPlaceProps = options.chapter >= Chapter::Props;
+    if (options.chapter >= Chapter::Meadow) {
+        scene.vegetation.emplace();
+        if (options.chapter == Chapter::Ecology) scene.vegetation->mode = VegetationMode::TerrainRules;
+    }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
         LoadScene(scenePath, scene);
+        if (scene.vegetation && options.scenePath.empty()) {
+            scene.camera = {{0.0f, 0.5f, 2.0f}, 13.0f, 30.0f, 38.0f};
+        }
         if (options.shadowOverrides) {
             scene.shadows = options.shadowOverrides;
         }
@@ -95,7 +107,8 @@ struct WorldDemo {
     WorldDemo(WebGpuContext& gpu, WGPUTextureFormat format,
               const std::filesystem::path& root, const ApplicationOptions& options)
         : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
-          editor(scene, options.scenePath, options.sculptTools) {}
+          editor(scene, options.scenePath, options.sculptTools || options.chapter == Chapter::Sculpt,
+                 renderer.PaintPreviews(), &renderer.VegetationStatistics()) {}
 
     //————————————————————————————————————————————————————————————————————————————————
     // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
@@ -233,6 +246,49 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
     log.Write("CAPTURE", "wrote " + path.string());
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 按同一机位与分辨率离屏绘制。逐帧等待 GPU，以区分 CPU 提交和包含 GPU 的整帧耗时。
+//————————————————————————————————————————————————————————————————————————————————
+void BenchmarkVegetation(WebGpuContext& gpu, WorldDemo& world) {
+    using Clock = std::chrono::steady_clock;
+    using Milliseconds = std::chrono::duration<double, std::milli>;
+    constexpr PixelSize size{1280, 720};
+    constexpr int warmup = 24;
+    constexpr int samples = 120;
+    constexpr int middle = samples / 2;
+    constexpr int p95 = (samples * 95 + 99) / 100 - 1;
+    FrameCapture target(gpu, size);
+    for (const bool instanced : {false, true}) {
+        world.scene.vegetation->instanced = instanced;
+        std::array<double, samples> submit{}, complete{};
+        for (int frame = -warmup; frame < samples; ++frame) {
+            const auto start = Clock::now();
+            EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
+            if (!encoder) throw std::runtime_error("Cannot create benchmark command encoder.");
+            world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
+            SubmitFrame(gpu, encoder.get());
+            const auto queued = Clock::now();
+            // 原生队列栅栏直接等 GPU，避免初始化轮询的毫秒级休眠进入测量。
+            wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
+            gpu.ProcessEvents();
+            const auto finished = Clock::now();
+            if (frame >= 0) {
+                submit[frame] = Milliseconds(queued - start).count();
+                complete[frame] = Milliseconds(finished - start).count();
+            }
+        }
+        std::sort(submit.begin(), submit.end());
+        std::sort(complete.begin(), complete.end());
+        const auto& stats = world.renderer.VegetationStatistics();
+        std::printf("%s | %ux%u | %d frames | grass %u tree %u rock %u | color draws %u shadow draws %u"
+                    " | CPU p50 %.3f ms | complete p50 %.3f ms p95 %.3f ms\n",
+                    instanced ? "Instanced" : "One draw per plant", size.width, size.height, samples,
+                    stats.instances[0], stats.instances[1], stats.instances[2], stats.colorDraws, stats.shadowDraws,
+                    (submit[middle - 1] + submit[middle]) * 0.5,
+                    (complete[middle - 1] + complete[middle]) * 0.5, complete[p95]);
+    }
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -275,13 +331,26 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Road) {
         title = "TinyWorld ch09 - Spline Roads";
         ready = "Chapter 09 spline road and planting mask ready";
+    } else if (options.chapter == Chapter::Props) {
+        title = "TinyWorld ch10 - Place Scene Objects";
+        ready = "Chapter 10 prop placement and transform gizmos ready";
+    } else if (options.chapter == Chapter::Meadow) {
+        title = "TinyWorld ch11 - Grass, Treeline and Instancing";
+        ready = "Chapter 11 grass cards, trees and instancing ready";
+    } else if (options.chapter == Chapter::Ecology) {
+        title = "TinyWorld ch12 - Terrain Ecology";
+        ready = "Chapter 12 seeded terrain vegetation and road exclusion ready";
     }
-    Window window(title, options.capturePath.empty());
+    Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
-    const auto format = options.direct ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
+    const auto format = options.direct || options.benchmarkVegetation ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
     Demo demo = CreateDemo(gpu, format, root, options);
     log.Write("GPU", ready);
+    if (options.benchmarkVegetation) {
+        BenchmarkVegetation(gpu, std::get<WorldDemo>(demo));
+        return 0;
+    }
 
     std::optional<EditorUi> editor;
     if (!options.direct) {

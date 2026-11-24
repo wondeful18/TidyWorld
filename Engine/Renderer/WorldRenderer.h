@@ -4,8 +4,10 @@
 #include "Engine/Renderer/SkyRenderer.h"
 #include "Engine/Renderer/SunShadowMap.h"
 #include "Engine/Renderer/SurfaceMaterials.h"
+#include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Renderer/WgpuHandle.h"
 #include "Engine/Renderer/WorldVertex.h"
+#include "Engine/Scene/RobotMesh.h"
 #include "Engine/Scene/WorldScene.h"
 
 #include <array>
@@ -29,6 +31,10 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
                   const WorldScene& scene, const std::filesystem::path& assetRoot);
+    [[nodiscard]] MaterialPreviews PaintPreviews() const {
+        return mMaterials ? mMaterials->PreviewViews() : MaterialPreviews{};
+    }
+    [[nodiscard]] const VegetationDrawStats& VegetationStatistics() const { return mVegetationStats; }
 
     //————————————————————————————————————————————————————————————————————————————————
     // 按目标像素尺寸准备相机深度缓冲，再编码本帧需要的通道。
@@ -57,6 +63,8 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     [[nodiscard]] Drawable UploadMesh(std::span<const WorldVertex> vertices, WGPUBindGroupLayout layout,
                                       const char* name);
+    [[nodiscard]] Drawable MakeDrawBinding(WGPUBindGroupLayout layout);
+    void SyncProps(const std::vector<PlacedProp>& props);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 高度变化后刷新受影响的固定大小顶点缓冲。
@@ -83,8 +91,16 @@ private:
     std::optional<SunShadowMap> mShadowMap;                // 仅由支持阴影的章节创建
     std::optional<SkyRenderer> mSky;                       // 第四章背景与共享环境纹理
     std::optional<SurfaceMaterials> mMaterials;            // 第八章底色与粗糙度数组
+    std::optional<VegetationRenderer> mVegetation;
+    Drawable mVegetationUniform;
+    PipelineHandle mVegetationPipeline;
+    VegetationDrawStats mVegetationStats;
     PipelineHandle mPipeline;                             // 方向光与深度测试管线
     std::array<Drawable, WorldScene::kObjectCount + 1> mDraws;  // 场景物体与步行角色的绘制资源
+    std::array<Drawable, kRobotLimbCount> mRobotLimbs;
+    Drawable mRock;
+    Drawable mCabin;
+    std::vector<Drawable> mPropDraws;
     std::vector<Drawable> mTerrainDraws;                    // 每个整数块键对应一次绘制
     std::vector<Drawable> mCoarseTerrainDraws;              // 第六章同一批块的 LOD1 网格
     std::array<bool, HeightField::kChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级

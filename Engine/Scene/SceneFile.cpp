@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -21,6 +22,10 @@ using Json = nlohmann::json;
 constexpr int kSceneVersion = 1;
 constexpr int kTerrainVersion = 2;
 constexpr int kRoadVersion = 3;
+constexpr int kPropVersion = 4;
+constexpr int kEcologyVersion = 5;
+constexpr int kLegacyHeightSide = 65;
+constexpr int kLegacyPaintSide = 128;
 constexpr float kCoordinateLimit = 1000000.0f;
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -62,6 +67,60 @@ glm::vec3 ReadVec3(const Json& value, float low = -kCoordinateLimit, float high 
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 常驻物体和手摆实例共用三组变换的校验规则。
+//————————————————————————————————————————————————————————————————————————————————
+Transform ReadTransform(const Json& entry) {
+    return {ReadVec3(entry.at("position")), ReadVec3(entry.at("rotation_deg")),
+            ReadVec3(entry.at("scale"), 0.0001f, 10000.0f)};
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 将旧样区放回新高度表的同一组世界坐标，向外过渡到默认地形。
+//————————————————————————————————————————————————————————————————————————————————
+void ReadHeightField(const Json& data, HeightField& field) {
+    const auto& side = data.at("samples_per_axis");
+    if (data.at("spacing_m") != HeightField::kSpacing ||
+        (side != HeightField::kSampleCount && side != kLegacyHeightSide)) {
+        throw std::runtime_error("Unsupported heightfield dimensions.");
+    }
+    const int savedSide = side.get<int>();
+    const auto& entries = data.at("heights_m");
+    RequireArray(entries, static_cast<std::size_t>(savedSide * savedSide));
+    auto samples = field.Values();
+    if (savedSide == HeightField::kSampleCount) {
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            samples[i] = ReadNumber(entries[i], -HeightField::kHeightLimit, HeightField::kHeightLimit);
+        }
+    } else {
+        constexpr int apron = (HeightField::kSampleCount - kLegacyHeightSide) / 2;
+        std::array<float, kLegacyHeightSide * kLegacyHeightSide> saved;
+        for (std::size_t i = 0; i < saved.size(); ++i) {
+            saved[i] = ReadNumber(entries[i], -HeightField::kHeightLimit, HeightField::kHeightLimit);
+        }
+        const auto& base = field.Values();
+        for (int z = 0; z < HeightField::kSampleCount; ++z) {
+            for (int x = 0; x < HeightField::kSampleCount; ++x) {
+                const int oldX = std::clamp(x - apron, 0, kLegacyHeightSide - 1);
+                const int oldZ = std::clamp(z - apron, 0, kLegacyHeightSide - 1);
+                const auto edge = (oldZ + apron) * HeightField::kSampleCount + oldX + apron;
+                const auto index = z * HeightField::kSampleCount + x;
+                const float previous = saved[oldZ * kLegacyHeightSide + oldX];
+                if (index == edge) {
+                    samples[index] = previous;
+                } else {
+                    // 旧边界处的编辑逐渐过渡到外圈生成地形。
+                    const int distance = std::max(std::abs(x - oldX - apron), std::abs(z - oldZ - apron));
+                    const float weight = 1.0f - static_cast<float>(distance) / apron;
+                    samples[index] = std::clamp(base[index] + weight * (previous - base[edge]),
+                                                -HeightField::kHeightLimit, HeightField::kHeightLimit);
+                }
+            }
+        }
+    }
+    field.ReplaceSamples(samples);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 只编码影响下次打开的编辑状态，游览控制器只是临时状态。
 //————————————————————————————————————————————————————————————————————————————————
 Json Encode(const WorldScene& scene) {
@@ -75,8 +134,10 @@ Json Encode(const WorldScene& scene) {
     const auto& spawn = scene.spawn.value();
     const auto& shadow = scene.shadows.value();
     const auto& sky = scene.environment.value();
+    const bool ecology = scene.vegetation && scene.vegetation->mode == VegetationMode::TerrainRules;
     Json doc = {
-        {"version", scene.road ? kRoadVersion : (scene.terrain ? kTerrainVersion : kSceneVersion)},
+        {"version", ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
+                                        : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion},
         {"objects", objects},
         {"spawn", {{scene.terrain ? "world_xz" : "ground_xz", Json::array({spawn.groundXZ.x, spawn.groundXZ.y})},
                    {"yaw_deg", spawn.yaw}}},
@@ -95,10 +156,17 @@ Json Encode(const WorldScene& scene) {
     }
     if (scene.road) {
         Json points = Json::array();
+        Json offsets = Json::array();
+        bool hasOffsets = false;
         for (const auto& point : scene.road->points) {
-            points.push_back({point.x, point.y});
+            points.push_back({point.x, point.z});
+            offsets.push_back(point.y);
+            hasOffsets |= point.y != 0.0f;
         }
         doc["road"] = {{"control_xz", std::move(points)}, {"width_m", scene.road->width}, {"margin_m", scene.road->margin}};
+        if (hasOffsets) {
+            doc["road"]["control_y_offset_m"] = std::move(offsets);
+        }
         doc["road"]["surface"] = static_cast<int>(scene.road->surface);
         doc["road"]["junction"] = static_cast<int>(scene.road->junction);
         doc["road"]["junction_point"] = scene.road->junctionPoint;
@@ -115,6 +183,17 @@ Json Encode(const WorldScene& scene) {
             }
         }
         doc["terrain_weights"] = {{"size", MaterialSplat::kSide}, {"rgba_hex", std::move(bytes)}};
+    }
+    if (scene.canPlaceProps) {
+        auto& props = doc["props"] = Json::array();
+        for (const auto& prop : scene.props) {
+            const auto& t = prop.transform;
+            props.push_back({{"asset", kPropAssets.at(prop.asset).id}, {"position", WriteVec3(t.position)},
+                             {"rotation_deg", WriteVec3(t.rotationDegrees)}, {"scale", WriteVec3(t.scale)}});
+        }
+    }
+    if (ecology) {
+        doc["vegetation"] = {{"seed", scene.vegetation->seed}, {"density", scene.vegetation->density}};
     }
     return doc;
 }
@@ -137,8 +216,7 @@ void ReadObjects(const Json& entries, WorldScene& scene) {
             throw std::runtime_error("Duplicate ID or mismatched scene asset.");
         }
         seen[index] = true;
-        match->transform = {ReadVec3(entry.at("position")), ReadVec3(entry.at("rotation_deg")),
-                            ReadVec3(entry.at("scale"), 0.0001f, 10000.0f)};
+        match->transform = ReadTransform(entry);
     }
 }
 
@@ -148,27 +226,17 @@ void ReadObjects(const Json& entries, WorldScene& scene) {
 WorldScene Decode(const Json& doc) {
     const auto& version = doc.at("version");
     if (!version.is_number_integer() || (version != kSceneVersion && version != kTerrainVersion &&
-                                         version != kRoadVersion)) {
+                                         version != kRoadVersion && version != kPropVersion &&
+                                         version != kEcologyVersion)) {
         throw std::runtime_error("Unsupported scene file version.");
     }
     WorldScene scene;
     const bool terrain = version != kSceneVersion;
     if (terrain) {
-        const auto& field = doc.at("heightfield");
-        if (field.at("spacing_m") != HeightField::kSpacing ||
-            field.at("samples_per_axis") != HeightField::kSampleCount) {
-            throw std::runtime_error("Unsupported heightfield dimensions.");
-        }
-        const auto& entries = field.at("heights_m");
-        HeightField::Samples samples;
-        RequireArray(entries, samples.size());
-        for (std::size_t i = 0; i < samples.size(); ++i) {
-            samples[i] = ReadNumber(entries[i], -HeightField::kHeightLimit, HeightField::kHeightLimit);
-        }
-        scene.terrain.emplace().ReplaceSamples(samples);
+        ReadHeightField(doc.at("heightfield"), scene.terrain.emplace());
         scene.canSculpt = true;
     }
-    if (version == kRoadVersion) {
+    if (version.get<int>() >= kRoadVersion) {
         const auto& data = doc.at("road");
         const auto& points = data.at("control_xz");
         if (!points.is_array() || points.size() < RoadSpline::kMinPoints || points.size() > RoadSpline::kMaxPoints) {
@@ -176,9 +244,15 @@ WorldScene Decode(const Json& doc) {
         }
         auto& road = scene.road.emplace();
         road.points.clear();
-        for (const auto& item : points) {
+        const auto offsets = data.find("control_y_offset_m");
+        if (offsets != data.end()) RequireArray(*offsets, points.size());
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            const auto& item = points[i];
             RequireArray(item, 2);
+            const float y = offsets == data.end() ? 0.0f
+                : ReadNumber((*offsets)[i], -RoadSpline::kHeightOffsetLimit, RoadSpline::kHeightOffsetLimit);
             road.points.emplace_back(ReadNumber(item[0], -RoadSpline::kPointLimit, RoadSpline::kPointLimit),
+                                     y,
                                      ReadNumber(item[1], -RoadSpline::kPointLimit, RoadSpline::kPointLimit));
         }
         road.width = ReadNumber(data.at("width_m"), RoadSpline::kMinimumWidth, RoadSpline::kMaximumWidth);
@@ -197,25 +271,58 @@ WorldScene Decode(const Json& doc) {
     if (terrain && doc.contains("terrain_weights")) {
         const auto& paint = doc.at("terrain_weights");
         const auto bytes = paint.at("rgba_hex").get<std::string>();
-        if (paint.at("size") != MaterialSplat::kSide || bytes.size() != MaterialSplat::kSide * MaterialSplat::kSide * 8) {
+        const auto& size = paint.at("size");
+        if (size != MaterialSplat::kSide && size != kLegacyPaintSide) {
             throw std::runtime_error("Invalid terrain paint dimensions.");
         }
+        const int side = size.get<int>();
+        if (bytes.size() != static_cast<std::size_t>(side * side * 8)) {
+            throw std::runtime_error("Invalid terrain paint data.");
+        }
         constexpr std::string_view hex = "0123456789abcdef";
-        MaterialSplat::Pixels pixels;
+        MaterialSplat::Pixels pixels(MaterialSplat::kSide * MaterialSplat::kSide);
+        const int apron = (MaterialSplat::kSide - side) / 2;
         std::size_t index = 0;
-        for (auto& pixel : pixels) {
-            for (auto& channel : pixel) {
-                const auto high = hex.find(bytes[index++]);
-                const auto low = hex.find(bytes[index++]);
-                if (high == std::string_view::npos || low == std::string_view::npos) {
-                    throw std::runtime_error("Invalid terrain paint channel.");
+        for (int z = apron; z < apron + side; ++z) {
+            for (int x = apron; x < apron + side; ++x) {
+                for (auto& channel : pixels[z * MaterialSplat::kSide + x]) {
+                    const auto high = hex.find(bytes[index++]);
+                    const auto low = hex.find(bytes[index++]);
+                    if (high == std::string_view::npos || low == std::string_view::npos) {
+                        throw std::runtime_error("Invalid terrain paint channel.");
+                    }
+                    channel = static_cast<std::uint8_t>(high * 16 + low);
                 }
-                channel = static_cast<std::uint8_t>(high * 16 + low);
             }
         }
         scene.paint.emplace().Replace(pixels);
     }
     ReadObjects(doc.at("objects"), scene);
+    if (version.get<int>() >= kPropVersion) {
+        scene.canPlaceProps = true;
+        const auto& props = doc.at("props");
+        if (!props.is_array() || props.size() > PlacedProp::kLimit) {
+            throw std::runtime_error("Invalid number of placed props.");
+        }
+        for (const auto& entry : props) {
+            const auto id = entry.at("asset").get<std::string>();
+            const auto asset = std::find_if(kPropAssets.begin(), kPropAssets.end(),
+                                            [&](const PropAsset& item) { return id == item.id; });
+            if (asset == kPropAssets.end()) throw std::runtime_error("Unknown placed prop asset.");
+            scene.props.push_back({static_cast<std::size_t>(asset - kPropAssets.begin()), ReadTransform(entry)});
+        }
+    }
+    if (version == kEcologyVersion) {
+        const auto& settings = doc.at("vegetation");
+        const auto& seed = settings.at("seed");
+        if (!seed.is_number_integer() || seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::runtime_error("Vegetation seed must be a 32-bit unsigned integer.");
+        }
+        auto& vegetation = scene.vegetation.emplace();
+        vegetation.mode = VegetationMode::TerrainRules;
+        vegetation.seed = seed.get<std::uint32_t>();
+        vegetation.density = ReadNumber(settings.at("density"), 0.0f, 1.0f);
+    }
 
     const auto& spawn = doc.at("spawn");
     const auto& xz = spawn.at(terrain ? "world_xz" : "ground_xz");
@@ -316,7 +423,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
         throw std::runtime_error("Choose a scene version that matches this chapter.");
     }
     if (loaded.road && !scene.road) {
-        throw std::runtime_error("Road scenes open in Chapter 09.");
+        throw std::runtime_error("Road scenes open in Chapter 09 or later.");
+    }
+    if (loaded.canPlaceProps && !scene.canPlaceProps) {
+        throw std::runtime_error("Prop scenes open in Chapter 10 or later.");
     }
     if (scene.road && !loaded.road) {
         loaded.road.emplace();
@@ -329,6 +439,15 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     }
     loaded.showChunkBorders = scene.showChunkBorders;
     loaded.materials = scene.materials;
+    loaded.canPlaceProps = scene.canPlaceProps;
+    if (loaded.vegetation && (!scene.vegetation || scene.vegetation->mode != VegetationMode::TerrainRules)) {
+        throw std::runtime_error("Ecology scenes open in Chapter 12 or later.");
+    }
+    if (scene.vegetation) {
+        if (!loaded.vegetation) loaded.vegetation = VegetationSettings{scene.vegetation->mode};
+        loaded.vegetation->visible = scene.vegetation->visible;
+        loaded.vegetation->instanced = scene.vegetation->instanced;
+    }
     scene = std::move(loaded);
 }
 

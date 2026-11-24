@@ -7,6 +7,7 @@
 namespace tinyworld {
 
 class WebGpuContext;
+using MaterialPreviews = std::array<WGPUTextureView, 4>;
 
 //————————————————————————————————————————————————————————————————————————————————
 // 为地表材质持有草、碎石和裸岩的纹理数组及共享采样器。
@@ -27,6 +28,7 @@ public:
     // 借用颜色通道使用的纹理与采样器绑定。
     //————————————————————————————————————————————————————————————————————————————————
     [[nodiscard]] WGPUBindGroup Binding() const { return mBinding.get(); }
+    [[nodiscard]] MaterialPreviews PreviewViews() const;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 笔划改变权重后上传像素。底色和粗糙度纹理可继续使用。
@@ -40,6 +42,7 @@ private:
     TextureViewHandle mWeightView; // 供片元采样
     std::uint64_t mPaintRevision{};  // 上一次上传的修订号
     TextureViewHandle mColorView;  // 草、碎石、岩石三层的底色视图
+    std::array<TextureViewHandle, 4> mPreviews;
     TextureViewHandle mRoughView;  // 同序的粗糙度视图
     SamplerHandle mSampler;        // 平铺和 mip 插值共用的采样器
     BindGroupLayoutHandle mLayout; // 着色器纹理槽布局

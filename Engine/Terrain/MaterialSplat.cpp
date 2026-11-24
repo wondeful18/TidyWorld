@@ -67,6 +67,9 @@ void MaterialSplat::Paint(glm::vec2 center, const MaterialBrush& brush, float se
 // 先验证所有像素，再提交，避免错误存档覆盖当前画面。
 //————————————————————————————————————————————————————————————————————————————————
 void MaterialSplat::Replace(const Pixels& pixels) {
+    if (pixels.size() != kSide * kSide) {
+        throw std::runtime_error("Invalid terrain paint dimensions.");
+    }
     if (std::any_of(pixels.begin(), pixels.end(), [](const Pixel& p) {
         return std::accumulate(p.begin(), p.end(), 0) > 255;
     })) {

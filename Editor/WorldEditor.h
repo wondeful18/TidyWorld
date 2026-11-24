@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Platform/Window.h"
+#include "Engine/Renderer/SurfaceMaterials.h"
 #include "Engine/Scene/WorldScene.h"
 
 #include <array>
@@ -11,6 +12,8 @@
 
 namespace tinyworld {
 
+struct VegetationDrawStats;
+
 //————————————————————————————————————————————————————————————————————————————————
 // 将小屋场景数据接入层级、属性面板和变换手柄。
 // 选中状态和拖动状态归编辑器所有，渲染器只消费场景参数。
@@ -20,7 +23,8 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     // 借用本章的场景数据。第三章打开时先显示太阳属性。
     //————————————————————————————————————————————————————————————————————————————————
-    explicit WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt = false);
+    explicit WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt = false,
+                         MaterialPreviews previews = {}, const VegetationDrawStats* vegetationStats = nullptr);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 在可编辑地形的视口顶部显示模式按钮与雕刻历史。
@@ -45,6 +49,10 @@ public:
 private:
     static constexpr std::size_t kMaterialPanel = WorldScene::kObjectCount + 1;  // 材质观察属性页
     static constexpr std::size_t kRoadPanel = WorldScene::kObjectCount + 2;      // 样条道路属性页
+    static constexpr std::size_t kPropsPanel = WorldScene::kObjectCount + 3;
+    static constexpr std::size_t kVegetationPanel = kPropsPanel + 1;
+    static constexpr std::size_t kFirstProp = kVegetationPanel + 1;
+    enum class GizmoMode { Move, Rotate, Scale };
     //————————————————————————————————————————————————————————————————————————————————
     // 提供场景路径和保存、重开按钮，在面板内报告结果。
     //————————————————————————————————————————————————————————————————————————————————
@@ -74,11 +82,16 @@ private:
     // 编辑控制点与宽度，并输出当前的避让图。
     //————————————————————————————————————————————————————————————————————————————————
     void DrawRoadInspector();
+    void DrawVegetationInspector();
 
     //————————————————————————————————————————————————————————————————————————————————
     // 将中心线和控制点投到视口，支持拾取后拖动。
     //————————————————————————————————————————————————————————————————————————————————
     void DrawRoadEditor(PixelSize size);
+    void DrawMaterialPalette();
+    void DrawPropsPalette();
+    void DrawPropPlacement(PixelSize size);
+    void SelectForEditing(std::optional<std::size_t> selection);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 环绕、缩放并编辑物体。调用时当前 ImGui 项为场景图片。
@@ -91,10 +104,12 @@ private:
     void UpdateRoam(float deltaSeconds);
 
     WorldScene& mScene;                        // 与渲染器共享的 CPU 场景
+    MaterialPreviews mPreviews;                // 借用渲染器的四个底色贴图切片
+    const VegetationDrawStats* mVegetationStats;  // 渲染器记录上一帧实际提交的批次
     std::optional<std::size_t> mSelected{2};   // 物体索引，kObjectCount 表示出生点，空值表示太阳
     std::array<char, 4096> mScenePath{};       // ImGui 编辑的 UTF-8 文件路径
     std::string mSceneStatus;                 // 最近一次保存或重开的结果
-    bool mRotate{};                           // 手柄切换为旋转模式
+    GizmoMode mGizmoMode{GizmoMode::Move};
     bool mOrbiting{};                         // 鼠标右键已经从视口内开始拖动
     bool mSculptEnabled{};                    // 当前用鼠标编辑地面
     bool mPainting{};                         // 左键笔划已从地形上开始
@@ -106,8 +121,9 @@ private:
     bool mMaterialPaint{};                   // 材质绘制占用视口左键
     bool mPaintDragging{};                   // 材质笔划从视口内开始
     std::size_t mRoadPoint{};                  // 当前道路控制点的索引
-    bool mDraggingRoadPoint{};                 // 已在视口按下某个控制点
+    float mRoadHeading{};                     // 拖动期间保持局部轴朝向
     std::string mRoadStatus;                   // 最近一次道路遮罩导出的结果
+    std::optional<std::size_t> mPlacement;     // 等待在地形上放下的原型索引
 };
 
 }  // namespace tinyworld

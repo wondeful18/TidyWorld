@@ -1,7 +1,7 @@
 {
   "camera": {
     "azimuth_deg": 8.0,
-    "distance_m": 34.5,
+    "distance_m": 50.0,
     "elevation_deg": 26.0,
     "target": [
       0.0,

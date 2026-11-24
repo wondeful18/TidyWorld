@@ -17,7 +17,8 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     // depthShader 提供太阳视角的顶点入口，objectLayout 与颜色通道共用。
     //————————————————————————————————————————————————————————————————————————————————
-    SunShadowMap(WebGpuContext& gpu, WGPUShaderModule depthShader, WGPUBindGroupLayout objectLayout);
+    SunShadowMap(WebGpuContext& gpu, WGPUShaderModule depthShader, WGPUBindGroupLayout objectLayout,
+                 bool vegetation = false);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 以太阳方向和固定场景范围构建正交视图投影。azimuth 的单位为度。
@@ -38,6 +39,7 @@ public:
     // 借用包含深度视图与比较采样器的绑定组，只用于颜色通道。
     //————————————————————————————————————————————————————————————————————————————————
     [[nodiscard]] WGPUBindGroup SamplingBinding() const { return mSamplingBinding.get(); }
+    [[nodiscard]] WGPURenderPipeline VegetationPipeline() const { return mVegetationPipeline.get(); }
 
 private:
     TextureHandle mTexture;               // 固定分辨率深度纹理，兼作附件和采样输入
@@ -46,6 +48,7 @@ private:
     BindGroupLayoutHandle mSamplingLayout; // 颜色管线读取深度图所用的绑定布局
     BindGroupHandle mSamplingBinding;     // 将深度图与比较采样器连到颜色管线
     PipelineHandle mDepthPipeline;       // 只有顶点和深度输出的太阳视角管线
+    PipelineHandle mVegetationPipeline;
 };
 
 }  // namespace tinyworld

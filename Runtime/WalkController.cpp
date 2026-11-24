@@ -3,6 +3,7 @@
 #include "Engine/Terrain/HeightField.h"
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
@@ -15,6 +16,7 @@ constexpr double kStep = 1.0 / 120.0;
 constexpr double kTimeTolerance = 1.0e-9;
 constexpr float kWalkSpeed = 1.8f;
 constexpr float kTurnSpeed = 125.0f;
+constexpr float kStrideMeters = 0.95f;  // 同一只脚两次落地之间的距离
 
 //————————————————————————————————————————————————————————————————————————————————
 // 将绕 Y 轴的角度转换成水平前向，角度使用度。
@@ -75,9 +77,19 @@ void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, Wal
         const glm::vec3 forward = Forward(mFeet.yaw);
         const float metersPerUnit = glm::length(groundBasis * forward);
         const float travel = input.forward * kWalkSpeed * stepSeconds / metersPerUnit;
+        const auto previous = mFeet.groundXZ;
         mFeet.groundXZ += glm::vec2(forward.x, forward.z) * travel;
         mFeet.groundXZ.x = std::clamp(mFeet.groundXZ.x, -limitX, limitX);
         mFeet.groundXZ.y = std::clamp(mFeet.groundXZ.y, -limitZ, limitZ);
+        const auto moved = mFeet.groundXZ - previous;
+        const float distance = glm::length(groundBasis * glm::vec3{moved.x, 0.0f, moved.y});
+        const bool stepping = distance > 1.0e-5f;
+        if (stepping) {
+            mGait.direction = std::copysign(1.0f, input.forward);
+            mGait.phase = std::remainder(mGait.phase + glm::two_pi<float>() * mGait.direction * distance / kStrideMeters,
+                                         glm::two_pi<float>());
+        }
+        mGait.strength = std::lerp(mGait.strength, stepping ? 1.0f : 0.0f, 12.0f * stepSeconds);
         mRemaining = std::max(0.0, mRemaining - kStep);
     }
     Follow(ground, terrain);
@@ -92,6 +104,8 @@ void WalkController::Follow(const Transform& ground, const HeightField* terrain)
     mCamera.target = mPose.position + glm::vec3{0.0f, 1.05f, 0.0f} + Forward(yaw) * 0.45f;
     mCamera.azimuth = yaw + 180.0f;
     if (terrain) {
+        // 稍偏向一侧，让第三人称视角同时看到腿和手臂的前后摆动。
+        mCamera.azimuth += 13.0f;
         mCamera.distance = 4.3f;
         mCamera.elevation = 13.0f;
         const auto eye = mCamera.Position();

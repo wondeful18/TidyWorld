@@ -84,7 +84,7 @@ BindGroupLayoutHandle BuildObjectLayout(WebGpuContext& gpu) {
 //————————————————————————————————————————————————————————————————————————————————
 PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUShaderModule shader,
                              WGPUBindGroupLayout objects, WGPUBindGroupLayout shadows,
-                             WGPUBindGroupLayout environment, WGPUBindGroupLayout materials) {
+                             WGPUBindGroupLayout environment, WGPUBindGroupLayout materials, bool vegetation = false) {
     const std::array layouts{objects, shadows, environment, materials};
     WGPUPipelineLayoutDescriptor pipelineLayout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
     pipelineLayout.bindGroupLayoutCount = materials ? 4 : (environment ? 3 : (shadows ? 2 : 1));
@@ -123,6 +123,9 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUS
     if (materials) {
         entry = srgb ? "fsMaterialsLinear" : "fsMaterialsDisplay";
     }
+    if (vegetation) {
+        entry = srgb ? "fsVegetationLinear" : "fsVegetationDisplay";
+    }
     fragment.entryPoint = {entry, WGPU_STRLEN};
     fragment.targetCount = 1;
     fragment.targets = &color;
@@ -133,13 +136,20 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUS
     depth.depthWriteEnabled = WGPUOptionalBool_True;
 
     WGPURenderPipelineDescriptor description = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    description.label = {"World color pipeline", WGPU_STRLEN};
+    description.label = {vegetation ? "Vegetation color pipeline" : "World color pipeline", WGPU_STRLEN};
     description.vertex.module = shader;
     const char* vertexEntry = shadows ? "vsShadowedWorld" : "vsWorld";
     description.vertex.entryPoint = {environment ? "vsEnvironmentWorld" : vertexEntry, WGPU_STRLEN};
     description.vertex.bufferCount = 1;
     description.vertex.buffers = &layout;
     description.primitive.cullMode = WGPUCullMode_Back;
+    const VegetationVertexLayout vegetationLayout;
+    if (vegetation) {
+        description.vertex.entryPoint = {"vsVegetation", WGPU_STRLEN};
+        description.vertex.bufferCount = vegetationLayout.buffers.size();
+        description.vertex.buffers = vegetationLayout.buffers.data();
+        description.primitive.cullMode = WGPUCullMode_None;
+    }
     description.depthStencil = &depth;
     description.fragment = &fragment;
 
@@ -180,8 +190,8 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
     const auto shader = LoadWgslModule(gpu, root / "shaders" / "world.wgsl");
     mObjectLayout = BuildObjectLayout(gpu);
     const auto layout = mObjectLayout.get();
-    if (scene.shadows || scene.environment) {
-        mShadowMap.emplace(gpu, shader.get(), layout);
+    if (scene.shadows || scene.environment || scene.vegetation) {
+        mShadowMap.emplace(gpu, shader.get(), layout, scene.vegetation.has_value());
     }
     if (scene.environment) {
         mSky.emplace(gpu, format, kDepthFormat, root);
@@ -197,6 +207,12 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
                               mShadowMap ? mShadowMap->SamplingLayout() : nullptr,
                               mSky ? mSky->Environment().Layout() : nullptr,
                               mMaterials ? mMaterials->Layout() : nullptr);
+    if (scene.vegetation) {
+        mVegetation.emplace(gpu);
+        mVegetationUniform = MakeDrawBinding(layout);
+        mVegetationPipeline = BuildPipeline(gpu, format, shader.get(), layout,
+                                            mShadowMap->SamplingLayout(), nullptr, nullptr, true);
+    }
 
     mClearColor = {0.89, 0.925, 0.941, 1.0};
     if (IsSrgbFormat(format)) {
@@ -216,7 +232,14 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mDraws[i] = UploadMesh(WithReflectivity(geometry, carSurfaces), layout,
                                walker ? "Walker" : scene.objects[i].name);
     }
+    if (scene.canPlaceProps) {
+        mRock = UploadMesh(WithReflectivity(MakeRockMesh()), layout, "Rock");
+        mCabin = UploadMesh(WithReflectivity(MakeCabinMesh()), layout, "Cabin");
+    }
     if (terrain) {
+        for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
+            mRobotLimbs[i] = UploadMesh(WithReflectivity(MakeRobotLimb(static_cast<RobotLimb>(i))), layout, "Robot limb");
+        }
         for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
             for (int x = HeightField::kFirstChunk; x < HeightField::kEndChunk; ++x) {
                 const auto mesh = MakeTerrainChunk(*terrain, {x, z}, !scene.road);
@@ -284,11 +307,16 @@ void WorldRenderer::SyncRoad(const HeightField& field, const RoadSpline& road) {
 //————————————————————————————————————————————————————————————————————————————————
 WorldRenderer::Drawable WorldRenderer::UploadMesh(std::span<const WorldVertex> vertices,
                                                    WGPUBindGroupLayout layout, const char* name) {
-    Drawable draw;
+    auto draw = MakeDrawBinding(layout);
     draw.count = static_cast<std::uint32_t>(vertices.size());
     const auto bytes = vertices.size_bytes();
     draw.vertices = MakeBuffer(mGpu.Device(), WGPUBufferUsage_Vertex, bytes, name);
     wgpuQueueWriteBuffer(mGpu.Queue(), draw.vertices.get(), 0, vertices.data(), bytes);
+    return draw;
+}
+
+WorldRenderer::Drawable WorldRenderer::MakeDrawBinding(WGPUBindGroupLayout layout) {
+    Drawable draw;
     draw.uniform = MakeBuffer(mGpu.Device(), WGPUBufferUsage_Uniform, sizeof(DrawUniform), "World object uniform");
 
     WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
@@ -303,6 +331,26 @@ WorldRenderer::Drawable WorldRenderer::UploadMesh(std::span<const WorldVertex> v
         throw std::runtime_error("Cannot bind world object uniform");
     }
     return draw;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 实例共用原型顶点缓冲，各自持有用于两条绘制通道的物体绑定。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldRenderer::SyncProps(const std::vector<PlacedProp>& props) {
+    const std::array prototypes{&mRock, &mDraws[1], &mDraws[2], &mCabin};
+    while (mPropDraws.size() < props.size()) {
+        mPropDraws.push_back(MakeDrawBinding(mObjectLayout.get()));
+    }
+    mPropDraws.resize(props.size());
+    for (std::size_t i = 0; i < props.size(); ++i) {
+        const auto& source = *prototypes[props[i].asset];
+        auto& draw = mPropDraws[i];
+        if (draw.vertices.get() != source.vertices.get()) {
+            wgpuBufferAddRef(source.vertices.get());
+            draw.vertices.reset(source.vertices.get());
+            draw.count = source.count;
+        }
+    }
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -336,6 +384,7 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
 void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size,
                            const WorldScene& scene) {
     ResizeDepth(size);
+    SyncProps(scene.props);
     if (mMaterials && scene.paint) {
         mMaterials->SyncPaint(mGpu.Queue(), *scene.paint);
     }
@@ -343,6 +392,9 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         SyncTerrain(*terrain, scene.showChunkBorders, !scene.road);
         if (scene.road) {
             SyncRoad(*terrain, *scene.road);
+        }
+        if (mVegetation && scene.vegetation) {
+            mVegetation->Sync(*terrain, scene.road, *scene.vegetation);
         }
     }
     const auto& camera = scene.ActiveCamera();
@@ -367,7 +419,8 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     glm::vec4 shadowControls{0.0f};
     const bool renderShadow = mShadowMap && scene.shadows && scene.shadows->enabled;
     if (renderShadow) {
-        lightViewProjection = SunShadowMap::ViewProjection(towardSun, scene.sun.azimuth, scene.terrain ? 3.0f : 1.0f);
+        const float shadowScale = scene.terrain ? HeightField::kHalfExtent * (3.0f / 16.0f) : 1.0f;
+        lightViewProjection = SunShadowMap::ViewProjection(towardSun, scene.sun.azimuth, shadowScale);
         shadowControls = {1.0f, scene.shadows->pcf ? 1.0f : 0.0f, scene.shadows->depthBias, 0.0f};
     }
 
@@ -378,6 +431,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         visibleCount = mDraws.size();
     }
     const bool showSpheres = scene.materials && scene.materials->spheres;
+    const bool showVegetation = mVegetation && scene.vegetation && scene.vegetation->visible && !showSpheres;
     if (showSpheres) {
         visibleCount = 0;
     }
@@ -392,9 +446,22 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
                                                            : scene.objects[i].transform.Matrix();
         uploadUniform(mDraws[i], model, shadowControls);
     }
+    if (scene.terrain && visibleCount > WorldScene::kObjectCount) {
+        const auto root = scene.WalkerPose().Matrix();
+        const auto gait = scene.WalkerGait();
+        for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
+            uploadUniform(mRobotLimbs[i], root * RobotLimbPose(static_cast<RobotLimb>(i), gait), shadowControls);
+        }
+    }
+    if (!showSpheres) {
+        for (std::size_t i = 0; i < scene.props.size(); ++i) {
+            uploadUniform(mPropDraws[i], scene.props[i].transform.Matrix(), shadowControls);
+        }
+    }
     glm::vec4 terrainMaterial{0.0f};
     if (scene.materials && scene.materials->view != MaterialView::VertexColor) {
-        terrainMaterial = {1.0f, static_cast<float>(scene.materials->view), scene.road ? 0.0f : 1.0f, 0.0f};
+        terrainMaterial = {1.0f, static_cast<float>(scene.materials->view), scene.road ? 0.0f : 1.0f,
+                           2.0f * HeightField::kHalfExtent};
     }
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
         uploadUniform(mCoarseChoice[i] ? mCoarseTerrainDraws[i] : mTerrainDraws[i], glm::mat4{1.0f},
@@ -421,9 +488,21 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     if (showBorders) {
         uploadUniform(*mChunkBorders, glm::mat4{1.0f}, glm::vec4{0.0f});
     }
+    mVegetationStats = {};
+    if (mVegetation) {
+        mVegetationStats.instances = mVegetation->Counts();
+    }
+    if (showVegetation) {
+        uploadUniform(mVegetationUniform, glm::mat4{1.0f}, shadowControls);
+    }
     if (renderShadow) {
         auto depthPass = mShadowMap->Begin(encoder);
         DrawObjects(depthPass.get(), visibleCount, showSpheres);
+        if (showVegetation) {
+            wgpuRenderPassEncoderSetPipeline(depthPass.get(), mShadowMap->VegetationPipeline());
+            wgpuRenderPassEncoderSetBindGroup(depthPass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
+            mVegetationStats.shadowDraws = mVegetation->Draw(depthPass.get(), scene.vegetation->instanced, true);
+        }
         wgpuRenderPassEncoderEnd(depthPass.get());
     }
 
@@ -446,6 +525,12 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     if (showBorders) {
         DrawMesh(pass.get(), *mChunkBorders);
     }
+    if (showVegetation) {
+        wgpuRenderPassEncoderSetPipeline(pass.get(), mVegetationPipeline.get());
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
+        wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
+        mVegetationStats.colorDraws = mVegetation->Draw(pass.get(), scene.vegetation->instanced, false);
+    }
     if (mSky && scene.environment) {
         mSky->Draw(pass.get(), projection, view, scene.environment->sky);
     }
@@ -465,6 +550,15 @@ void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleC
     if (showSpheres) {
         for (const auto& sphere : mMaterialSpheres) {
             DrawMesh(pass, sphere);
+        }
+    } else {
+        if (!mTerrainDraws.empty() && visibleCount > WorldScene::kObjectCount) {
+            for (const auto& limb : mRobotLimbs) {
+                DrawMesh(pass, limb);
+            }
+        }
+        for (const auto& prop : mPropDraws) {
+            DrawMesh(pass, prop);
         }
     }
 }

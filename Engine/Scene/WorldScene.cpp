@@ -31,6 +31,9 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     const auto materialView = materials;
     auto paintMap = std::move(paint);
     auto roadLayout = std::move(road);
+    const bool placeProps = canPlaceProps;
+    auto placedProps = std::move(props);
+    const auto vegetationSettings = vegetation;
     *this = WorldScene{};
     // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
     shadows = shadowSettings;
@@ -43,6 +46,9 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     materials = materialView;
     paint = std::move(paintMap);
     road = std::move(roadLayout);
+    canPlaceProps = placeProps;
+    props = std::move(placedProps);
+    vegetation = vegetationSettings;
     if (materials) {
         materials->spheres = false;
     }
@@ -55,7 +61,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     }
     if (terrain) {
         spawn = WalkSpawn{{TerrainTrailX(10.4f), 10.4f}, 180.0f};
-        camera = {{0.0f, 0.5f, 0.0f}, 18.0f, 36.0f, 43.0f};
+        camera = {{0.0f, 0.5f, 0.0f}, 18.0f, 36.0f, 56.0f};
         objects[1].transform.position = {4.2f, 0.0f, 1.55f};
         objects[2].transform.position = {-3.85f, 0.0f, 3.6f};
         objects[kCarIndex].transform.position = {-2.3f, 0.0f, 6.1f};
@@ -98,16 +104,9 @@ void WorldScene::SculptTerrain(glm::vec2 center, const TerrainBrush& brush, floa
     if (!canSculpt || !terrain || IsWalking()) {
         return;
     }
-    std::array<float, kObjectCount> before{};
-    for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
-        const auto& p = objects[i].transform.position;
-        before[i] = terrain->HeightAt({p.x, p.z});
-    }
+    const auto before = *terrain;
     if (terrain->ApplyBrush(center, brush, seconds)) {
-        for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
-            auto& p = objects[i].transform.position;
-            p.y += terrain->HeightAt({p.x, p.z}) - before[i];
-        }
+        UpdateGroundedObjects(before);
     }
 }
 
@@ -117,9 +116,22 @@ void WorldScene::SculptTerrain(glm::vec2 center, const TerrainBrush& brush, floa
 void WorldScene::RestoreTerrain(const HeightField::Samples& samples) {
     const auto before = *terrain;
     terrain->ReplaceSamples(samples);
+    UpdateGroundedObjects(before);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 地形变化后保持原有地标和手摆物体各自的离地高度。
+//————————————————————————————————————————————————————————————————————————————————
+void WorldScene::UpdateGroundedObjects(const HeightField& previous) {
+    const auto conform = [&](glm::vec3& p) {
+        const glm::vec2 xz{p.x, p.z};
+        p.y += terrain->HeightAt(xz) - previous.HeightAt(xz);
+    };
     for (std::size_t i = kGroundIndex + 1; i < objects.size(); ++i) {
-        auto& p = objects[i].transform.position;
-        p.y += terrain->HeightAt({p.x, p.z}) - before.HeightAt({p.x, p.z});
+        conform(objects[i].transform.position);
+    }
+    for (auto& prop : props) {
+        conform(prop.transform.position);
     }
 }
 

@@ -45,6 +45,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/SunShadowMap.h
     Engine/Renderer/TriangleRenderer.cpp
     Engine/Renderer/TriangleRenderer.h
+    Engine/Renderer/VegetationRenderer.cpp
+    Engine/Renderer/VegetationRenderer.h
     Engine/Renderer/WebGpuContext.cpp
     Engine/Renderer/WebGpuContext.h
     Engine/Renderer/WgpuHandle.h
@@ -53,6 +55,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/WorldVertex.h
     Engine/Scene/OrbitCamera.cpp
     Engine/Scene/OrbitCamera.h
+    Engine/Scene/PlacedProp.cpp
+    Engine/Scene/PlacedProp.h
     Engine/Scene/PrimitiveMesh.h
     Engine/Scene/RobotMesh.cpp
     Engine/Scene/RobotMesh.h
@@ -78,6 +82,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Terrain/RoadSpline.h
     Engine/Terrain/TerrainMesh.cpp
     Engine/Terrain/TerrainMesh.h
+    Engine/Terrain/Vegetation.cpp
+    Engine/Terrain/Vegetation.h
     Runtime/WalkController.cpp
     Runtime/WalkController.h
 )

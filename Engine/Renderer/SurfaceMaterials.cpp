@@ -33,6 +33,12 @@ TextureHandle MakeArray(WGPUDevice device, WGPUTextureFormat format) {
     WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
     descriptor.size = {kTileSize, kTileSize, static_cast<std::uint32_t>(kMaterials.size())};
     descriptor.format = format;
+    constexpr auto displayFormat = WGPUTextureFormat_RGBA8Unorm;
+    if (format == WGPUTextureFormat_RGBA8UnormSrgb) {
+        // ImGui 纹理输入使用显示空间的底色值。
+        descriptor.viewFormatCount = 1;
+        descriptor.viewFormats = &displayFormat;
+    }
     descriptor.mipLevelCount = kMipCount;
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
     TextureHandle texture(wgpuDeviceCreateTexture(device, &descriptor));
@@ -139,6 +145,16 @@ SurfaceMaterials::SurfaceMaterials(WebGpuContext& gpu, const std::filesystem::pa
     }
     mColorView = ArrayView(mBaseColor.get());
     mRoughView = ArrayView(mRoughness.get());
+    for (std::uint32_t layer = 0; layer < mPreviews.size(); ++layer) {
+        WGPUTextureViewDescriptor view = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        view.dimension = WGPUTextureViewDimension_2D;
+        view.format = WGPUTextureFormat_RGBA8Unorm;
+        view.baseArrayLayer = layer;
+        view.arrayLayerCount = 1;
+        view.mipLevelCount = kMipCount;
+        mPreviews[layer].reset(wgpuTextureCreateView(mBaseColor.get(), &view));
+        if (!mPreviews[layer]) throw std::runtime_error("Cannot create terrain texture preview.");
+    }
     WGPUTextureDescriptor weights = WGPU_TEXTURE_DESCRIPTOR_INIT;
     weights.size = {MaterialSplat::kSide, MaterialSplat::kSide, 1};
     weights.format = WGPUTextureFormat_RGBA8Unorm;
@@ -193,7 +209,18 @@ SurfaceMaterials::SurfaceMaterials(WebGpuContext& gpu, const std::filesystem::pa
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 当前样区用一张 128 × 128 的纹理，变化时一次上传全部线性通道。
+// 借用同一底色数组的四个二维切片作为编辑器预览。
+//————————————————————————————————————————————————————————————————————————————————
+MaterialPreviews SurfaceMaterials::PreviewViews() const {
+    MaterialPreviews views{};
+    for (std::size_t i = 0; i < views.size(); ++i) {
+        views[i] = mPreviews[i].get();
+    }
+    return views;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 权重变化时一次上传全部线性通道。
 //————————————————————————————————————————————————————————————————————————————————
 void SurfaceMaterials::SyncPaint(WGPUQueue queue, const MaterialSplat& paint) {
     if (mPaintRevision == paint.Revision()) {
@@ -205,7 +232,8 @@ void SurfaceMaterials::SyncPaint(WGPUQueue queue, const MaterialSplat& paint) {
     layout.bytesPerRow = MaterialSplat::kSide * 4;
     layout.rowsPerImage = MaterialSplat::kSide;
     const WGPUExtent3D size{MaterialSplat::kSide, MaterialSplat::kSide, 1};
-    wgpuQueueWriteTexture(queue, &target, paint.Values().data(), sizeof(MaterialSplat::Pixels), &layout, &size);
+    const auto& pixels = paint.Values();
+    wgpuQueueWriteTexture(queue, &target, pixels.data(), pixels.size() * sizeof(MaterialSplat::Pixel), &layout, &size);
     mPaintRevision = paint.Revision();
 }
 //————————————————————————————————————————————————————————————————————————————————
