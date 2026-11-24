@@ -1,5 +1,7 @@
 #include "Editor/WorldEditor.h"
 
+#include "Engine/Scene/DayCycle.h"
+
 #include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Scene/SceneFile.h"
 #include "Engine/Terrain/TerrainMesh.h"
@@ -108,7 +110,7 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.dayCycle ? kDayCyclePanel : mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
@@ -242,6 +244,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
         SelectForEditing(kWaterPanel);
+    }
+    if (mScene.dayCycle && ImGui::Selectable("Day / night", mSelected == kDayCyclePanel)) {
+        SelectForEditing(kDayCyclePanel);
     }
     if (mScene.lightmapEnabled && ImGui::Selectable("Baked lighting", mSelected == kLightmapPanel)) {
         SelectForEditing(kLightmapPanel);
@@ -405,6 +410,33 @@ void WorldEditor::DrawInspector() {
         }
         return;
     }
+    if (auto& day = mScene.dayCycle; day && mSelected == kDayCyclePanel && !mSculptEnabled) {
+        const int minute = static_cast<int>(WrapDayHour(day->hour) * 60.0f);
+        ImGui::Text("Time %02d:%02d", minute / 60, minute % 60);
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::SliderFloat("##time-hours", &day->hour, 0.0f, 24.0f, "%.2f h", ImGuiSliderFlags_AlwaysClamp)) {
+            day->playing = false;
+        }
+        const auto jumpTo = [&](const char* name, float hour) {
+            if (ImGui::Button(name)) {
+                day->hour = hour;
+                day->playing = false;
+            }
+        };
+        jumpTo("Sunrise", 6.75f);
+        ImGui::SameLine();
+        jumpTo("Noon", 12.0f);
+        ImGui::SameLine();
+        jumpTo("Night", 21.0f);
+        ImGui::Checkbox("Play", &day->playing);
+        if (ImGui::Button("Valley view")) mScene.camera = WorldScene::kDayCamera;
+        ImGui::SameLine();
+        if (ImGui::Button("Porch view")) mScene.camera = WorldScene::kPorchCamera;
+        const auto light = EvaluateDaylight(day->hour);
+        ImGui::Text("Sun altitude %.1f deg", light.sun.elevation);
+        ImGui::Text("Night blend %.0f%%", light.nightMix * 100.0f);
+        return;
+    }
     if (auto& lightmap = mScene.lightmapEnabled; lightmap && mSelected == kLightmapPanel && !mSculptEnabled) {
         ImGui::Checkbox("Porch lightmap", &*lightmap);
         if (ImGui::Button("Porch view")) mScene.camera = WorldScene::kPorchCamera;
@@ -481,9 +513,12 @@ void WorldEditor::DrawInspector() {
     if (!mSelected) {
         auto& sun = mScene.sun;
         ImGui::SeparatorText("Directional sunlight");
+        if (mScene.dayCycle) ImGui::TextUnformatted("Sun direction and power follow Day / night.");
+        ImGui::BeginDisabled(mScene.dayCycle.has_value());
         ImGui::SliderFloat("Azimuth", &sun.azimuth, -180.0f, 180.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Elevation", &sun.elevation, 0.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Intensity", &sun.intensity, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::EndDisabled();
         if (auto& shadows = mScene.shadows) {
             ImGui::SeparatorText("Shadow map");
             ImGui::Checkbox("Enable shadows", &shadows->enabled);

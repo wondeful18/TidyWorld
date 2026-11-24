@@ -22,13 +22,13 @@ public:
     // 从可执行文件的资源目录载入照片及 WGSL，创建背景与共享环境纹理。
     //————————————————————————————————————————————————————————————————————————————————
     SkyRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
-                WGPUTextureFormat depthFormat, const std::filesystem::path& assetRoot);
+                WGPUTextureFormat depthFormat, const std::filesystem::path& assetRoot, bool withNight);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 在已画完不透明物体的通道中输出选中的天空网格。
     //————————————————————————————————————————————————————————————————————————————————
     void Draw(WGPURenderPassEncoder pass, const glm::mat4& projection,
-              const glm::mat4& view, SkyMode mode, glm::vec4 horizon) const;
+              const glm::mat4& view, SkyMode mode, glm::vec4 horizon, float nightMix) const;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 借用资源，以便车身和背景采样同一环境 Cubemap。

@@ -97,9 +97,9 @@ std::uint8_t EncodeSrgb(float value) {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 在线性空间对全景图做双线性采样。水平方向连接接缝，上下钳位到极点。
+// 复用 8 位 sRGB 到线性 RGB 的转换表。
 //————————————————————————————————————————————————————————————————————————————————
-glm::vec3 SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
+const std::array<float, 256>& LinearSamples() {
     static const auto values = [] {
         std::array<float, 256> linear{};
         for (std::size_t i = 0; i < linear.size(); ++i) {
@@ -107,6 +107,14 @@ glm::vec3 SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
         }
         return linear;
     }();
+    return values;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 在线性空间对全景图做双线性采样。水平方向连接接缝，上下钳位到极点。
+//————————————————————————————————————————————————————————————————————————————————
+glm::vec3 SamplePanorama(const PanoramaImage& image, glm::vec2 uv) {
+    const auto& values = LinearSamples();
     const glm::vec2 pixel = uv * glm::vec2(image.width, image.height) - 0.5f;
     const int x0 = static_cast<int>(std::floor(pixel.x));
     const int y0 = static_cast<int>(std::floor(pixel.y));
@@ -153,10 +161,33 @@ void UploadLayer(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size,
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 用照片的线性亮度生成同方向的低照度蓝调夜景，保留山脊和云的结构。
+//————————————————————————————————————————————————————————————————————————————————
+glm::vec3 NightColor(glm::vec3 day) {
+    const float luminance = glm::dot(day, glm::vec3{0.2126f, 0.7152f, 0.0722f});
+    return glm::vec3{0.0018f, 0.0037f, 0.0090f} + luminance * glm::vec3{0.012f, 0.024f, 0.061f};
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 生成全景夜图的像素。纹理需要 sRGB 字节，混合在 shader 解码后执行。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<Pixel> MakeNightPanorama(const PanoramaImage& day) {
+    const auto& linear = LinearSamples();
+    std::vector<Pixel> night(static_cast<std::size_t>(day.width) * day.height);
+    for (std::size_t i = 0; i < night.size(); ++i) {
+        const auto* rgba = day.pixels.get() + 4 * i;
+        const auto c = NightColor({linear[rgba[0]], linear[rgba[1]], linear[rgba[2]]});
+        night[i] = {EncodeSrgb(c.r), EncodeSrgb(c.g), EncodeSrgb(c.b), 255};
+    }
+    return night;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 将同一张全景照片按方向重投影到 Cubemap 的六个面。
 //————————————————————————————————————————————————————————————————————————————————
-void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const PanoramaImage& panorama) {
+void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const PanoramaImage& panorama, bool withNight, WGPUTexture nightCube) {
     std::vector<Pixel> pixels(static_cast<std::size_t>(size.width) * size.height);
+    std::vector<Pixel> night(withNight ? pixels.size() : 0);
     for (std::uint32_t face = 0; face < size.depthOrArrayLayers; ++face) {
         for (std::uint32_t y = 0; y < size.height; ++y) {
             for (std::uint32_t x = 0; x < size.width; ++x) {
@@ -164,11 +195,16 @@ void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const P
                 const float v = 2.0f * (y + 0.5f) / size.height - 1.0f;
                 const auto direction = CubeDirection(face, u, v);
                 const auto rgb = SamplePanorama(panorama, PanoramaUv(direction));
-                pixels[static_cast<std::size_t>(y) * size.width + x] =
-                    {EncodeSrgb(rgb.r), EncodeSrgb(rgb.g), EncodeSrgb(rgb.b), 255};
+                const auto index = static_cast<std::size_t>(y) * size.width + x;
+                pixels[index] = {EncodeSrgb(rgb.r), EncodeSrgb(rgb.g), EncodeSrgb(rgb.b), 255};
+                if (withNight) {
+                    const auto c = NightColor(rgb);
+                    night[index] = {EncodeSrgb(c.r), EncodeSrgb(c.g), EncodeSrgb(c.b), 255};
+                }
             }
         }
         UploadLayer(queue, texture, size, face, pixels.data());
+        if (withNight) UploadLayer(queue, nightCube, size, face, night.data());
     }
 }
 
@@ -177,7 +213,7 @@ void UploadCube(WGPUQueue queue, WGPUTexture texture, WGPUExtent3D size, const P
 //————————————————————————————————————————————————————————————————————————————————
 // 上传环境数据，并为背景与车身提供相同的 Cubemap 视图和采样器。
 //————————————————————————————————————————————————————————————————————————————————
-EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& panoramaPath) {
+EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& panoramaPath, bool withNight) {
     const auto panorama = LoadPanorama(panoramaPath);
     for (std::size_t i = 0; i < mHorizon.size(); ++i) {
         const float u = static_cast<float>(i) / mHorizon.size();
@@ -194,17 +230,27 @@ EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& 
     mCube = CreateTexture(gpu.Device(), cubeSize, "Chapter 04 environment cube");
     mPanorama = CreateTexture(gpu.Device(), panoSize, "Chapter 04 equirectangular panorama");
     gpu.CheckValidation("chapter 04 environment textures");
-    if (!mCube || !mPanorama) {
+    if (withNight) {
+        mNightCube = CreateTexture(gpu.Device(), cubeSize, "Chapter 18 night cube");
+        mNightPanorama = CreateTexture(gpu.Device(), panoSize, "Chapter 18 night panorama");
+    }
+    if (!mCube || !mPanorama || (withNight && (!mNightCube || !mNightPanorama))) {
         throw std::runtime_error("Cannot create environment textures");
     }
     wgpuDevicePushErrorScope(gpu.Device(), WGPUErrorFilter_Validation);
-    UploadCube(gpu.Queue(), mCube.get(), cubeSize, panorama);
+    UploadCube(gpu.Queue(), mCube.get(), cubeSize, panorama, withNight, mNightCube.get());
     UploadLayer(gpu.Queue(), mPanorama.get(), panoSize, 0, panorama.pixels.get());
     WGPUTextureViewDescriptor cubeView = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
     cubeView.dimension = WGPUTextureViewDimension_Cube;
     cubeView.arrayLayerCount = 6;
     mCubeView.reset(wgpuTextureCreateView(mCube.get(), &cubeView));
     mPanoView.reset(wgpuTextureCreateView(mPanorama.get(), nullptr));
+    if (withNight) {
+        const auto pixels = MakeNightPanorama(panorama);
+        UploadLayer(gpu.Queue(), mNightPanorama.get(), panoSize, 0, pixels.data());
+        mNightCubeView.reset(wgpuTextureCreateView(mNightCube.get(), &cubeView));
+        mNightPanoView.reset(wgpuTextureCreateView(mNightPanorama.get(), nullptr));
+    }
 
     WGPUSamplerDescriptor filtering = WGPU_SAMPLER_DESCRIPTOR_INIT;
     filtering.minFilter = WGPUFilterMode_Linear;
@@ -215,11 +261,9 @@ EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& 
     filtering.addressModeU = WGPUAddressMode_Repeat;
     mPanoSampler.reset(wgpuDeviceCreateSampler(gpu.Device(), &filtering));
 
-    std::array<WGPUBindGroupLayoutEntry, 4> layouts{{
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-    }};
+    std::array<WGPUBindGroupLayoutEntry, 6> layouts;
     for (std::uint32_t index = 0; index < layouts.size(); ++index) {
+        layouts[index] = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
         layouts[index].binding = index;
         layouts[index].visibility = WGPUShaderStage_Fragment;
     }
@@ -229,26 +273,29 @@ EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& 
     layouts[2].texture.sampleType = WGPUTextureSampleType_Float;
     layouts[2].texture.viewDimension = WGPUTextureViewDimension_2D;
     layouts[3].sampler.type = WGPUSamplerBindingType_Filtering;
+    layouts[4].texture = layouts[0].texture;
+    layouts[5].texture = layouts[2].texture;
     WGPUBindGroupLayoutDescriptor layout = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
     layout.entryCount = layouts.size();
     layout.entries = layouts.data();
     mLayout.reset(wgpuDeviceCreateBindGroupLayout(gpu.Device(), &layout));
     gpu.CheckValidation("chapter 04 environment upload and views");
-    if (!mCubeView || !mPanoView || !mCubeSampler || !mPanoSampler || !mLayout) {
+    if (!mCubeView || !mPanoView || !mCubeSampler || !mPanoSampler || !mLayout ||
+        (withNight && (!mNightCubeView || !mNightPanoView))) {
         throw std::runtime_error("Cannot create environment views or sampling layout");
     }
 
-    std::array<WGPUBindGroupEntry, 4> entries{{
-        WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
-        WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
-    }};
+    std::array<WGPUBindGroupEntry, 6> entries;
     for (std::uint32_t index = 0; index < entries.size(); ++index) {
+        entries[index] = WGPU_BIND_GROUP_ENTRY_INIT;
         entries[index].binding = index;
     }
     entries[0].textureView = mCubeView.get();
     entries[1].sampler = mCubeSampler.get();
     entries[2].textureView = mPanoView.get();
     entries[3].sampler = mPanoSampler.get();
+    entries[4].textureView = withNight ? mNightCubeView.get() : mCubeView.get();
+    entries[5].textureView = withNight ? mNightPanoView.get() : mPanoView.get();
     WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
     binding.layout = mLayout.get();
     binding.entryCount = entries.size();
@@ -264,11 +311,12 @@ EnvironmentMap::EnvironmentMap(WebGpuContext& gpu, const std::filesystem::path& 
 //————————————————————————————————————————————————————————————————————————————————
 // 查观察方向对应的经度，并在周期表中平滑过渡，避免环绕接缝时跳色。
 //————————————————————————————————————————————————————————————————————————————————
-glm::vec3 EnvironmentMap::HorizonColor(glm::vec3 direction) const {
+glm::vec3 EnvironmentMap::HorizonColor(glm::vec3 direction, float nightMix) const {
     const float u = glm::fract(PanoramaUv(direction).x);
     const float sample = u * mHorizon.size();
     const auto index = static_cast<std::size_t>(sample) % mHorizon.size();
-    return glm::mix(mHorizon[index], mHorizon[(index + 1) % mHorizon.size()], glm::fract(sample));
+    const auto day = glm::mix(mHorizon[index], mHorizon[(index + 1) % mHorizon.size()], glm::fract(sample));
+    return glm::mix(day, NightColor(day), nightMix);
 }
 
 }  // namespace tinyworld

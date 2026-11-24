@@ -47,6 +47,14 @@ struct DirectionalSun {
 };
 
 //————————————————————————————————————————————————————————————————————————————————
+// 第十八章的场景时刻与播放状态。存档仅保存时刻。
+//————————————————————————————————————————————————————————————————————————————————
+struct DayCycleSettings {
+    float hour{12.0f};  // 小时，午夜同属周期起点
+    bool playing{};     // 拖动时间轴后暂停
+};
+
+//————————————————————————————————————————————————————————————————————————————————
 // 第三章可编辑的太阳阴影参数。深度偏移用光源投影的 0–1 深度单位。
 //————————————————————————————————————————————————————————————————————————————————
 struct ShadowSettings {
@@ -76,6 +84,7 @@ struct MaterialPreview {
 // 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
+    static constexpr OrbitCamera kDayCamera{{9.0f, 1.4f, 1.6f}, -30.0f, 15.0f, 28.0f};
     static constexpr OrbitCamera kPorchCamera{{3.55f, 1.17f, 7.75f}, 24.0f, 22.0f, 9.0f};
     static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
     static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
@@ -105,6 +114,7 @@ struct WorldScene {
     bool canUseGltfProps{};  // 第十三章开启 glTF 原型与桥面查询
     std::optional<VegetationSettings> vegetation;  // 由样地或规则生成的植被参数
     std::optional<WaterSettings> water;  // 水面调试及运行时间
+    std::optional<DayCycleSettings> dayCycle;  // 第十八章驱动实时太阳与环境光
     std::optional<bool> lightmapEnabled;  // 第十七章开启图集，值本身用于实时对照
     std::optional<AtmosphereSettings> atmosphere;  // 第十六章的雾和阴影距离预览
 

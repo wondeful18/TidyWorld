@@ -1,5 +1,7 @@
 #include "Engine/Scene/SceneFile.h"
 
+#include "Engine/Scene/DayCycle.h"
+
 #include "Engine/Scene/WorldScene.h"
 
 #include <nlohmann/json.hpp>
@@ -26,6 +28,7 @@ constexpr int kPropVersion = 4;
 constexpr int kEcologyVersion = 5;
 constexpr int kVillageVersion = 6;
 constexpr int kLightmapVersion = 7;
+constexpr int kDayCycleVersion = 8;
 constexpr int kLegacyHeightSide = 65;
 constexpr int kLegacyPaintSide = 128;
 constexpr float kCoordinateLimit = 1000000.0f;
@@ -138,7 +141,7 @@ Json Encode(const WorldScene& scene) {
     const auto& sky = scene.environment.value();
     const bool ecology = scene.vegetation && scene.vegetation->mode == VegetationMode::TerrainRules;
     Json doc = {
-        {"version", scene.lightmapEnabled ? kLightmapVersion : scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
+        {"version", scene.dayCycle ? kDayCycleVersion : scene.lightmapEnabled ? kLightmapVersion : scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
                                         : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion},
         {"objects", objects},
         {"spawn", {{scene.terrain ? "world_xz" : "ground_xz", Json::array({spawn.groundXZ.x, spawn.groundXZ.y})},
@@ -151,6 +154,7 @@ Json Encode(const WorldScene& scene) {
         {"environment", {{"sky", sky.sky == SkyMode::Cubemap ? "cubemap" : "panorama"},
                          {"car_reflection", sky.carReflection}}},
     };
+    if (scene.dayCycle) doc["time_hours"] = WrapDayHour(scene.dayCycle->hour);
     if (scene.terrain) {
         doc["heightfield"] = {{"spacing_m", HeightField::kSpacing},
                               {"samples_per_axis", HeightField::kSampleCount},
@@ -234,12 +238,15 @@ WorldScene Decode(const Json& doc) {
     if (!version.is_number_integer() || (version != kSceneVersion && version != kTerrainVersion &&
                                          version != kRoadVersion && version != kPropVersion &&
                                          version != kEcologyVersion && version != kVillageVersion &&
-                                         version != kLightmapVersion)) {
+                                         version != kLightmapVersion && version != kDayCycleVersion)) {
         throw std::runtime_error("Unsupported scene file version.");
     }
     WorldScene scene;
     const bool terrain = version != kSceneVersion;
-    if (version == kLightmapVersion) scene.lightmapEnabled = true;
+    if (version.get<int>() >= kLightmapVersion) scene.lightmapEnabled = true;
+    if (version == kDayCycleVersion) {
+        scene.dayCycle.emplace().hour = WrapDayHour(ReadNumber(doc.at("time_hours"), 0.0f, 24.0f));
+    }
     if (terrain) {
         ReadHeightField(doc.at("heightfield"), scene.terrain.emplace());
         scene.canSculpt = true;
@@ -462,6 +469,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
         throw std::runtime_error("Lightmap scenes open in Chapter 17 or later.");
     }
     loaded.lightmapEnabled = scene.lightmapEnabled;
+    if (loaded.dayCycle && !scene.dayCycle) {
+        throw std::runtime_error("Day-cycle scenes open in Chapter 18 or later.");
+    }
+    if (!loaded.dayCycle) loaded.dayCycle = scene.dayCycle;
     loaded.canUseGltfProps = scene.canUseGltfProps;
     if (scene.road && !loaded.road) {
         loaded.road.emplace();

@@ -5,6 +5,7 @@
 #include "Engine/Renderer/RenderPass.h"
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
+#include "Engine/Scene/DayCycle.h"
 #include "Engine/Scene/GltfAsset.h"
 #include "Engine/Scene/Lightmap.h"
 #include "Engine/Scene/RobotMesh.h"
@@ -58,10 +59,11 @@ struct DrawUniform {
     glm::vec4 material;            // 材质类别和对应的参数
     glm::vec4 coast;               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
     FrameAtmosphere air;           // 物体、植被与水面共用的距离参数
+    glm::vec4 lighting;             // 环境亮度与夜景混合，z/w 保留
 };
 
 static_assert(offsetof(DrawUniform, lightViewProjection) == 224);
-static_assert(sizeof(DrawUniform) == 384);
+static_assert(sizeof(DrawUniform) == 400);
 
 //————————————————————————————————————————————————————————————————————————————————
 // 显式定义物体布局，使太阳深度和颜色管线可共用每个物体的绑定。
@@ -209,7 +211,7 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mShadowMap.emplace(gpu, shader.get(), layout, scene.vegetation.has_value());
     }
     if (scene.environment) {
-        mSky.emplace(gpu, format, kDepthFormat, root);
+        mSky.emplace(gpu, format, kDepthFormat, root, scene.dayCycle.has_value());
     }
     if (scene.water) {
         if (!mSky) throw std::runtime_error("Water requires a sky environment.");
@@ -465,8 +467,10 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const auto view = camera.View();
     const glm::mat4 vp = projection * view;
     const auto eye = camera.Position();
+    const auto light = scene.dayCycle ? EvaluateDaylight(scene.dayCycle->hour) : Daylight{scene.sun};
+    const glm::vec4 lighting{light.ambient, light.nightMix, 0.0f, 0.0f};
     const glm::vec4 horizon = hasCoast && mSky
-        ? glm::vec4(mSky->Environment().HorizonColor(glm::normalize(camera.target - eye)), 1.0f)
+        ? glm::vec4(mSky->Environment().HorizonColor(glm::normalize(camera.target - eye), light.nightMix), 1.0f)
         : glm::vec4{0.0f};
     FrameAtmosphere air;
     if (scene.atmosphere) {
@@ -477,15 +481,17 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     }
     const bool reflectCar = scene.environment && scene.environment->carReflection;
     const glm::vec4 cameraAndReflection(eye, reflectCar ? 1.0f : 0.0f);
-    const auto towardSun = scene.sun.TowardLight();
+    const auto towardSun = light.sun.TowardLight();
     const glm::vec4 direction(towardSun, 0.0f);
-    const glm::vec4 sun(scene.sun.color * scene.sun.intensity, 0.0f);
+    const glm::vec4 sun(light.sun.color * light.sun.intensity, 0.0f);
     glm::mat4 lightViewProjection{1.0f};
     glm::vec4 shadowControls{0.0f};
-    const bool renderShadow = mShadowMap && scene.shadows && scene.shadows->enabled;
+    // 当夜间直射已经为零，本帧不需要更新太阳深度图，接收端也不再查询它。
+    const bool renderShadow = mShadowMap && scene.shadows && scene.shadows->enabled &&
+                              (!scene.dayCycle || light.sun.intensity > 0.0f);
     if (renderShadow) {
         const float shadowScale = scene.terrain ? HeightField::kHalfExtent * (3.0f / 16.0f) : 1.0f;
-        lightViewProjection = SunShadowMap::ViewProjection(towardSun, scene.sun.azimuth, shadowScale);
+        lightViewProjection = SunShadowMap::ViewProjection(towardSun, light.sun.azimuth, shadowScale);
         shadowControls = {1.0f, scene.shadows->pcf ? 1.0f : 0.0f, scene.shadows->depthBias, 0.0f};
     }
 
@@ -503,7 +509,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const auto uploadUniform = [&](const Drawable& draw, const glm::mat4& model, const glm::vec4& shadows,
                                    const glm::vec4& material = glm::vec4{0.0f}) {
         const DrawUniform uniforms{vp, model, glm::transpose(glm::inverse(model)), direction, sun,
-                                   lightViewProjection, shadows, cameraAndReflection, material, coast, air};
+                                   lightViewProjection, shadows, cameraAndReflection, material, coast, air, lighting};
         wgpuQueueWriteBuffer(mGpu.Queue(), draw.uniform.get(), 0, &uniforms, sizeof(uniforms));
     };
     for (std::size_t i = scene.terrain ? 1 : 0; i < visibleCount; ++i) {
@@ -608,11 +614,11 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         mVegetationStats.colorDraws = mVegetation->Draw(pass.get(), scene.vegetation->instanced, false);
     }
     if (mSky && scene.environment) {
-        mSky->Draw(pass.get(), projection, view, scene.environment->sky, horizon);
+        mSky->Draw(pass.get(), projection, view, scene.environment->sky, horizon, light.nightMix);
     }
     wgpuRenderPassEncoderEnd(pass.get());
     if (showWater) {
-        mWater->Encode(encoder, target, mDepthView.get(), vp, eye, *scene.water, glm::vec3(horizon), air);
+        mWater->Encode(encoder, target, mDepthView.get(), vp, eye, *scene.water, glm::vec3(horizon), air, lighting);
     }
 }
 

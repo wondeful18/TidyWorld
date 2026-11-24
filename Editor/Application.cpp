@@ -1,5 +1,7 @@
 #include "Editor/Application.h"
 
+#include "Engine/Scene/DayCycle.h"
+
 #include "Editor/EditorUi.h"
 #include "Editor/FrameCapture.h"
 #include "Editor/SmokeTest.h"
@@ -92,6 +94,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         scene.lightmapEnabled = options.lightmapEnabled.value_or(true);
         if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
     }
+    if (options.chapter >= Chapter::DayCycle) scene.dayCycle.emplace();
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
@@ -105,6 +108,9 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.environmentOverrides) {
             scene.environment = options.environmentOverrides;
         }
+        if (scene.dayCycle && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
+            scene.camera = WorldScene::kDayCamera;
+        }
         if (options.worldPreset == WorldPreset::Porch) scene.camera = WorldScene::kPorchCamera;
         if (options.worldPreset == WorldPreset::Shore) scene.camera = WorldScene::kShoreCamera;
         scene.SetDriving(options.worldPreset == WorldPreset::Drive);
@@ -113,6 +119,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
             scene.materials->spheres = options.worldPreset == WorldPreset::Materials;
         }
     }
+    if (scene.dayCycle && options.dayHour) scene.dayCycle->hour = WrapDayHour(*options.dayHour);
     return scene;
 }
 
@@ -378,6 +385,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Lightmap) {
         title = "TinyWorld ch17 - Bake a Lightmap";
         ready = "Chapter 17 CPU-baked porch lightmap and UV2 ready";
+    } else if (options.chapter == Chapter::DayCycle) {
+        title = "TinyWorld ch18 - Day and Night";
+        ready = "Chapter 18 shared day-night sky, reflections and solar shadows ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
@@ -421,6 +431,10 @@ int RunApplication(const ApplicationOptions& options) {
             if (auto* world = std::get_if<WorldDemo>(&demo)) {
                 auto& scene = world->scene;
                 const double seconds = frameIntervalMs / 1000.0;
+                if (scene.dayCycle && scene.dayCycle->playing) {
+                    const float hours = static_cast<float>(std::min(seconds, 0.1)) * 0.75f;
+                    scene.dayCycle->hour = WrapDayHour(scene.dayCycle->hour + hours);
+                }
                 if (scene.water) {
                     scene.water->seconds = std::fmod(scene.water->seconds + static_cast<float>(std::min(seconds, 0.1)),
                                                      WaterSettings::kLoopSeconds);

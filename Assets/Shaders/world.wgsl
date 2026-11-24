@@ -13,6 +13,7 @@ struct DrawUniform {
     material: vec4<f32>,            // 类别与对应参数，地形的 w 为世界边长
     coast: vec4<f32>,               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
     air: FrameAtmosphere,           // 与水面共用的雾色、衰减和世界尺度
+    lighting: vec4<f32>,             // 环境亮度和日夜混合
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawUniform;
@@ -20,6 +21,7 @@ struct DrawUniform {
 @group(1) @binding(1) var sunDepthSampler: sampler_comparison;
 @group(2) @binding(0) var environmentCube: texture_cube<f32>;
 @group(2) @binding(1) var environmentSampler: sampler;
+@group(2) @binding(4) var nightCube: texture_cube<f32>;
 @group(3) @binding(0) var surfaceColor: texture_2d_array<f32>;
 @group(3) @binding(1) var surfaceRough: texture_2d_array<f32>;
 @group(3) @binding(2) var surfaceSampler: sampler;
@@ -159,7 +161,7 @@ fn sunVisibility(input: VertexOutput) -> f32 {
 //————————————————————————————————————————————————————————————————————————————————
 fn shade(input: VertexOutput, visibility: f32) -> vec3<f32> {
     let facingSun = max(dot(normalize(input.normal), draw.towardSun.xyz), 0.0);
-    let ambient = vec3<f32>(0.30, 0.34, 0.38);
+    let ambient = vec3<f32>(0.30, 0.34, 0.38) * draw.lighting.x;
     let direct = (facingSun * visibility) * draw.sunRadiance.xyz;
     return clamp(input.color * (ambient + direct), vec3<f32>(0.0), vec3<f32>(1.0));
 }
@@ -216,7 +218,11 @@ fn shadeEnvironment(input: VertexOutput) -> vec3<f32> {
     let normal = normalize(input.normal);
     let incident = normalize(input.worldPosition - draw.cameraAndReflection.xyz);
     let reflected = reflect(incident, normal);
-    let environment = textureSampleLevel(environmentCube, environmentSampler, reflected, 0.0).rgb;
+    var environment = textureSampleLevel(environmentCube, environmentSampler, reflected, 0.0).rgb;
+    if draw.lighting.y > 0.0 {
+        let night = textureSampleLevel(nightCube, environmentSampler, reflected, 0.0).rgb;
+        environment = mix(environment, night, draw.lighting.y);
+    }
     let grazing = 1.0 - max(dot(-incident, normal), 0.0);
     let weight = input.reflectivity * (0.72 + 0.22 * grazing * grazing);
     return mix(diffuse, environment, weight);
@@ -296,7 +302,7 @@ fn shadePbr(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32) -> vec
     let specular = distribution * visibility * fresnel;
     let diffuse = (1.0 - fresnel) * (1.0 - metal) * base / pi;
     let direct = (diffuse + specular) * draw.sunRadiance.xyz * (3.1 * nL * sunVisibility(input));
-    let ambient = vec3<f32>(0.37, 0.42, 0.43) * (base * (1.0 - metal) + f0 * 0.65);
+    let ambient = vec3<f32>(0.37, 0.42, 0.43) * (base * (1.0 - metal) + f0 * 0.65) * draw.lighting.x;
     return clamp(direct + ambient, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 

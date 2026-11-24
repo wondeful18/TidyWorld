@@ -20,7 +20,7 @@ namespace {
 //————————————————————————————————————————————————————————————————————————————————
 struct SkyUniform {
     glm::mat4 rotationProjection;  // 去掉相机平移后的视图投影
-    glm::vec4 options;             // x 为天空球开关，其余保留
+    glm::vec4 options;             // x 为天空球开关，y 为夜景混合
     glm::vec4 horizon;             // 海岸天际线的线性 RGB，w 为开关
 };
 
@@ -144,8 +144,8 @@ BufferHandle MakeSkyBuffer(WGPUDevice device, WGPUBufferUsage usage, std::uint64
 // 创建常量绑定和两种天空网格，两个模式共用一条渲染管线。
 //————————————————————————————————————————————————————————————————————————————————
 SkyRenderer::SkyRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
-                         WGPUTextureFormat depthFormat, const std::filesystem::path& assetRoot)
-    : mGpu(gpu), mEnvironment(gpu, assetRoot / "environments" / "ch04" / "golden-gate-hills.jpg") {
+                         WGPUTextureFormat depthFormat, const std::filesystem::path& assetRoot, bool withNight)
+    : mGpu(gpu), mEnvironment(gpu, assetRoot / "environments" / "ch04" / "golden-gate-hills.jpg", withNight) {
     const auto shader = LoadWgslModule(gpu, assetRoot / "shaders" / "sky.wgsl");
     WGPUBindGroupLayoutEntry constants = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
     constants.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
@@ -194,11 +194,11 @@ SkyRenderer::SkyRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
 // 保留相机旋转，使天空随视线转向，平移时始终以相机为中心。
 //————————————————————————————————————————————————————————————————————————————————
 void SkyRenderer::Draw(WGPURenderPassEncoder pass, const glm::mat4& projection,
-                       const glm::mat4& view, SkyMode mode, glm::vec4 horizon) const {
+                       const glm::mat4& view, SkyMode mode, glm::vec4 horizon, float nightMix) const {
     const bool panorama = mode == SkyMode::Panorama;
     const std::size_t index = panorama ? 1 : 0;
     const SkyUniform constants{projection * glm::mat4(glm::mat3(view)),
-                               glm::vec4{panorama ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f}, horizon};
+                               glm::vec4{panorama ? 1.0f : 0.0f, nightMix, 0.0f, 0.0f}, horizon};
     wgpuQueueWriteBuffer(mGpu.Queue(), mUniform.get(), 0, &constants, sizeof(constants));
     wgpuRenderPassEncoderSetPipeline(pass, mPipeline.get());
     wgpuRenderPassEncoderSetBindGroup(pass, 0, mViewBinding.get(), 0, nullptr);

@@ -63,6 +63,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Scene/GltfAsset.h
     Engine/Scene/OrbitCamera.cpp
     Engine/Scene/OrbitCamera.h
+    Engine/Scene/DayCycle.cpp
+    Engine/Scene/DayCycle.h
     Engine/Scene/Lightmap.cpp
     Engine/Scene/Lightmap.h
     Engine/Scene/PlacedProp.cpp
@@ -260,7 +262,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(check Village Coast Lightmap)
+    foreach(check Village Coast Lightmap DayCycle)
         set(check_target TinyWorld${check}Checks)
         add_executable(${check_target} Tests/${check}Checks.cpp)
         target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
@@ -277,4 +279,6 @@ if(BUILD_TESTING)
     target_sources(TinyWorldLightmapChecks PRIVATE Tools/LightmapBaker/Bake.cpp)
     add_test(NAME LightmapChecks
         COMMAND TinyWorldLightmapChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME DayCycleChecks
+        COMMAND TinyWorldDayCycleChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

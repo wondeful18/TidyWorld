@@ -80,8 +80,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Atmosphere;
             } else if (value == "17") {
                 options.chapter = tinyworld::Chapter::Lightmap;
+            } else if (value == "18") {
+                options.chapter = tinyworld::Chapter::DayCycle;
             } else {
-                std::cerr << "Choose chapter 01 through 17.\n";
+                std::cerr << "Choose chapter 01 through 18.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -161,6 +163,13 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             options.waterTime = seconds;
+        } else if (argument == "--time" && index + 1 < argc) {
+            float hour{};
+            if (!ParseFloatInRange(argv[++index], hour, 0.0f, 24.0f)) {
+                std::cerr << "Time must be in [0, 24] hours.\n";
+                return EXIT_FAILURE;
+            }
+            options.dayHour = hour;
         } else if (argument == "--lightmap" && index + 1 < argc) {
             const std::string_view value = argv[++index];
             if (value != "on" && value != "off") {
@@ -184,7 +193,7 @@ int main(int argc, char** argv) {
             }
             options.shadowDistance = metres;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..17] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..18] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -198,7 +207,8 @@ int main(int argc, char** argv) {
                          "Chapter 14+: [--water lit|depth|no-reflection|off] [--water-time seconds]\n"
                          "Chapter 15+: [--preset shore]\n"
                          "Chapter 16+: [--fog on|off] [--shadow-distance metres]\n"
-                         "Chapter 17+: [--lightmap on|off] [--preset porch]\n";
+                         "Chapter 17+: [--lightmap on|off] [--preset porch]\n"
+                         "Chapter 18: [--time hours]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -230,6 +240,10 @@ int main(int argc, char** argv) {
     }
     if ((options.waterView || options.waterTime) && options.chapter < tinyworld::Chapter::Water) {
         std::cerr << "Water options require chapter 14.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.dayHour && options.chapter < tinyworld::Chapter::DayCycle) {
+        std::cerr << "Time options require chapter 18 or later.\n";
         return EXIT_FAILURE;
     }
     if ((options.lightmapEnabled || options.worldPreset == tinyworld::WorldPreset::Porch) &&

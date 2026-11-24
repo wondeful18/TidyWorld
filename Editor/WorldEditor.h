@@ -54,7 +54,8 @@ private:
     static constexpr std::size_t kWaterPanel = kVegetationPanel + 1;  // 水面观察选项
     static constexpr std::size_t kAtmospherePanel = kWaterPanel + 1;  // 距离雾与阴影距离选项
     static constexpr std::size_t kLightmapPanel = kAtmospherePanel + 1;
-    static constexpr std::size_t kFirstProp = kLightmapPanel + 1;
+    static constexpr std::size_t kDayCyclePanel = kLightmapPanel + 1;
+    static constexpr std::size_t kFirstProp = kDayCyclePanel + 1;
     enum class GizmoMode { Move, Rotate, Scale };
     //————————————————————————————————————————————————————————————————————————————————
     // 提供场景路径和保存、重开按钮，在面板内报告结果。

@@ -8,12 +8,14 @@ struct WaterUniform {
     controls: vec4<f32>,                 // 深度观察、反射开关、海岸开关与填充
     horizon: vec4<f32>,                  // 与天空共用的远海线性颜色
     air: FrameAtmosphere,               // 与不透明物体共用的雾参数
+    lighting: vec4<f32>,             // 环境亮度和日夜混合
 }
 
 @group(0) @binding(0) var<uniform> water: WaterUniform;
 @group(0) @binding(1) var opaqueDepth: texture_depth_2d;
 @group(1) @binding(0) var environmentCube: texture_cube<f32>;
 @group(1) @binding(1) var environmentSampler: sampler;
+@group(1) @binding(4) var nightCube: texture_cube<f32>;
 
 //————————————————————————————————————————————————————————————————————————————————
 // 片元阶段使用像素位置查场景深度，使用世界位置生成波纹与反射。
@@ -81,19 +83,23 @@ fn shadeWater(input: WaterVertex) -> vec4<f32> {
     let normal = normalize(vec3<f32>(slopes.x, 1.0, slopes.y));
     let toEye = normalize(water.cameraAndTime.xyz - input.world);
     let reflectDir = reflect(-toEye, normal);
-    let reflected = textureSampleLevel(environmentCube, environmentSampler, reflectDir, 0.0).rgb;
+    var reflected = textureSampleLevel(environmentCube, environmentSampler, reflectDir, 0.0).rgb;
+    if water.lighting.y > 0.0 {
+        let night = textureSampleLevel(nightCube, environmentSampler, reflectDir, 0.0).rgb;
+        reflected = mix(reflected, night, water.lighting.y);
+    }
     let fresnel = 0.025 + 0.65 * pow(1.0 - clamp(dot(toEye, normal), 0.0, 1.0), 3.7);
     let absorption = mix(1.7, 2.8, sea);
     let attenuation = 1.0 - exp(-depthM * absorption);
     let shallow = vec3<f32>(0.11, 0.49, 0.42);
     let deep = mix(vec3<f32>(0.017, 0.16, 0.21), vec3<f32>(0.012, 0.105, 0.19), sea);
-    var color = mix(mix(shallow, deep, attenuation), reflected, fresnel * water.controls.y);
+    var color = mix(mix(shallow, deep, attenuation) * water.lighting.x, reflected, fresnel * water.controls.y);
     let foamWave = 2.0 * cross + 1.3 * longWave;
     let creekRipple = 0.5 + 0.5 * mix(sin(foamWave - 8.0 * phase), sin(foamWave - 2.0 * phase), lake);
     let ripple = mix(creekRipple, coastCrest * 0.84 + 0.16 * creekRipple, sea);
     let foamLimit = mix(0.18, 0.32, sea);
     let foam = (1.0 - smoothstep(0.035, foamLimit, depthM)) * smoothstep(0.50, 0.92, ripple);
-    color = mix(color, vec3<f32>(0.72, 0.88, 0.87), foam * 0.80);
+    color = mix(color, vec3<f32>(0.72, 0.88, 0.87) * water.lighting.x, foam * 0.80);
     let inlandAlpha = clamp(0.30 + 0.62 * attenuation + 0.55 * foam + fresnel * water.controls.y, 0.0, 1.0);
     let alpha = mix(inlandAlpha, 1.0, sea * smoothstep(0.95, 2.3, depthM));
     let distanceToEye = distance(water.cameraAndTime.xyz, input.world);

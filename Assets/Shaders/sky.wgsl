@@ -3,7 +3,7 @@
 //————————————————————————————————————————————————————————————————————————————————
 struct SkyUniform {
     rotationProjection: mat4x4<f32>, // 方向到裁剪空间，不含相机平移
-    options: vec4<f32>,             // x 为全景天空球开关，其余保留
+    options: vec4<f32>,             // x 为全景开关，y 为夜景比例
     horizon: vec4<f32>,             // 海岸天际线的线性 RGB，w 为开关
 }
 
@@ -12,6 +12,8 @@ struct SkyUniform {
 @group(1) @binding(1) var cubeSampler: sampler;
 @group(1) @binding(2) var panorama: texture_2d<f32>;
 @group(1) @binding(3) var panoSampler: sampler;
+@group(1) @binding(4) var nightCube: texture_cube<f32>;
+@group(1) @binding(5) var nightPanorama: texture_2d<f32>;
 
 //————————————————————————————————————————————————————————————————————————————————
 // 传给片元的方向与世界坐标系对齐，插值后再归一化。
@@ -46,9 +48,16 @@ fn panoramaUv(direction: vec3<f32>) -> vec2<f32> {
 fn sampleSky(direction: vec3<f32>) -> vec4<f32> {
     var sampled: vec4<f32>;
     if (sky.options.x > 0.5) {
-        sampled = textureSampleLevel(panorama, panoSampler, panoramaUv(direction), 0.0);
+        let uv = panoramaUv(direction);
+        sampled = textureSampleLevel(panorama, panoSampler, uv, 0.0);
+        if sky.options.y > 0.0 {
+            sampled = mix(sampled, textureSampleLevel(nightPanorama, panoSampler, uv, 0.0), sky.options.y);
+        }
     } else {
         sampled = textureSampleLevel(skyCube, cubeSampler, direction, 0.0);
+        if sky.options.y > 0.0 {
+            sampled = mix(sampled, textureSampleLevel(nightCube, cubeSampler, direction, 0.0), sky.options.y);
+        }
     }
     if (sky.horizon.w > 0.5) {
         // 海平面上方保留照片的云层，靠近地平线逐渐衔接远海的颜色。

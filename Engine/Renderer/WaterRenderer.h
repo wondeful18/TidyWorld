@@ -32,7 +32,7 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     void Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
                 const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
-                glm::vec3 horizon, const FrameAtmosphere& air);
+                glm::vec3 horizon, const FrameAtmosphere& air, glm::vec4 lighting);
 
 private:
     WebGpuContext& mGpu;                    // 借用设备与上传队列

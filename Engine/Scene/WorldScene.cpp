@@ -38,6 +38,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     const auto waterSettings = water;
     const auto atmosphereSettings = atmosphere;
     const auto lightmapSetting = lightmapEnabled;
+    const auto dayCycleSettings = dayCycle;
     *this = WorldScene{};
     // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
     shadows = shadowSettings;
@@ -57,6 +58,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     water = waterSettings;
     atmosphere = atmosphereSettings;
     lightmapEnabled = lightmapSetting;
+    dayCycle = dayCycleSettings;
     if (materials) {
         materials->spheres = false;
     }
