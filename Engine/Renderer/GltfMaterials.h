@@ -5,6 +5,7 @@
 namespace tinyworld {
 
 class WebGpuContext;
+struct GltfImage;
 struct GltfMaterial;
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -25,11 +26,16 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     // 上传材质，返回保有两张纹理与系数缓冲的绑定。
     //————————————————————————————————————————————————————————————————————————————————
-    [[nodiscard]] BindGroupHandle Upload(const GltfMaterial& source) const;
+    [[nodiscard]] BindGroupHandle Upload(const GltfMaterial& source, WGPUTextureView lightmap) const;
+    //————————————————————————————————————————————————————————————————————————————————
+    // 将线性图集上传到二维纹理，返回持有纹理的视图。
+    //————————————————————————————————————————————————————————————————————————————————
+    [[nodiscard]] TextureViewHandle UploadLightmap(const GltfImage& source) const;
 
 private:
     WebGpuContext& mGpu;              // 借用渲染设备与上传队列
     BindGroupLayoutHandle mLayout;   // glTF 管线第四组绑定
+    TextureViewHandle mBlackLightmap; // 共用的空图，保持绑定布局完整
     SamplerHandle mSampler;          // 使用线性过滤和重复寻址
 };
 

@@ -25,6 +25,7 @@ constexpr int kRoadVersion = 3;
 constexpr int kPropVersion = 4;
 constexpr int kEcologyVersion = 5;
 constexpr int kVillageVersion = 6;
+constexpr int kLightmapVersion = 7;
 constexpr int kLegacyHeightSide = 65;
 constexpr int kLegacyPaintSide = 128;
 constexpr float kCoordinateLimit = 1000000.0f;
@@ -137,7 +138,7 @@ Json Encode(const WorldScene& scene) {
     const auto& sky = scene.environment.value();
     const bool ecology = scene.vegetation && scene.vegetation->mode == VegetationMode::TerrainRules;
     Json doc = {
-        {"version", scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
+        {"version", scene.lightmapEnabled ? kLightmapVersion : scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
                                         : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion},
         {"objects", objects},
         {"spawn", {{scene.terrain ? "world_xz" : "ground_xz", Json::array({spawn.groundXZ.x, spawn.groundXZ.y})},
@@ -191,6 +192,7 @@ Json Encode(const WorldScene& scene) {
             const auto& t = prop.transform;
             props.push_back({{"asset", kPropAssets.at(prop.asset).id}, {"position", WriteVec3(t.position)},
                              {"rotation_deg", WriteVec3(t.rotationDegrees)}, {"scale", WriteVec3(t.scale)}});
+            if (!prop.lightmap.empty()) props.back()["lightmap"] = prop.lightmap;
         }
     }
     if (ecology) {
@@ -231,11 +233,13 @@ WorldScene Decode(const Json& doc) {
     const auto& version = doc.at("version");
     if (!version.is_number_integer() || (version != kSceneVersion && version != kTerrainVersion &&
                                          version != kRoadVersion && version != kPropVersion &&
-                                         version != kEcologyVersion && version != kVillageVersion)) {
+                                         version != kEcologyVersion && version != kVillageVersion &&
+                                         version != kLightmapVersion)) {
         throw std::runtime_error("Unsupported scene file version.");
     }
     WorldScene scene;
     const bool terrain = version != kSceneVersion;
+    if (version == kLightmapVersion) scene.lightmapEnabled = true;
     if (terrain) {
         ReadHeightField(doc.at("heightfield"), scene.terrain.emplace());
         scene.canSculpt = true;
@@ -318,10 +322,20 @@ WorldScene Decode(const Json& doc) {
             if (index >= kBuiltinPropCount && !scene.canUseGltfProps) {
                 throw std::runtime_error("glTF props require a village scene.");
             }
-            scene.props.push_back({index, ReadTransform(entry)});
+            std::string lightmap;
+            if (entry.contains("lightmap")) {
+                lightmap = entry.at("lightmap").get<std::string>();
+                if (!scene.lightmapEnabled || !asset->lightmap || lightmap != asset->lightmap) {
+                    throw std::runtime_error("Lightmap path does not match this prop asset.");
+                }
+            }
+            if (asset->lightmap && !scene.lightmapEnabled) {
+                throw std::runtime_error("The baked porch requires a Chapter 17 scene.");
+            }
+            scene.props.push_back({index, ReadTransform(entry), std::move(lightmap)});
         }
     }
-    if (version == kEcologyVersion || (version == kVillageVersion && doc.contains("vegetation"))) {
+    if (version == kEcologyVersion || (version.get<int>() >= kVillageVersion && doc.contains("vegetation"))) {
         const auto& settings = doc.at("vegetation");
         const auto& seed = settings.at("seed");
         if (!seed.is_number_integer() || seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
@@ -444,6 +458,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     if (loaded.canUseGltfProps && !scene.canUseGltfProps) {
         throw std::runtime_error("Village scenes open in Chapter 13 or later.");
     }
+    if (loaded.lightmapEnabled && !scene.lightmapEnabled) {
+        throw std::runtime_error("Lightmap scenes open in Chapter 17 or later.");
+    }
+    loaded.lightmapEnabled = scene.lightmapEnabled;
     loaded.canUseGltfProps = scene.canUseGltfProps;
     if (scene.road && !loaded.road) {
         loaded.road.emplace();

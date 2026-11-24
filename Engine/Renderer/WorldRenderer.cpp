@@ -6,6 +6,7 @@
 #include "Engine/Renderer/ShaderModule.h"
 #include "Engine/Renderer/WebGpuContext.h"
 #include "Engine/Scene/GltfAsset.h"
+#include "Engine/Scene/Lightmap.h"
 #include "Engine/Scene/RobotMesh.h"
 #include "Engine/Scene/RoamingCarMesh.h"
 #include "Engine/Scene/SceneMesh.h"
@@ -95,17 +96,18 @@ PipelineHandle BuildPipeline(WebGpuContext& gpu, WGPUTextureFormat format, WGPUS
     pipelineLayout.bindGroupLayoutCount = materials ? 4 : (environment ? 3 : (shadows ? 2 : 1));
     pipelineLayout.bindGroupLayouts = layouts.data();
 
-    std::array<WGPUVertexAttribute, 5> attributes{};
+    std::array<WGPUVertexAttribute, 6> attributes{};
     constexpr auto geometry = offsetof(WorldVertex, geometry);
     constexpr std::array offsets{geometry + offsetof(SceneVertex, position),
                                  geometry + offsetof(SceneVertex, normal),
                                  geometry + offsetof(SceneVertex, color),
-                                 offsetof(WorldVertex, reflectivity), offsetof(WorldVertex, uv)};
+                                 offsetof(WorldVertex, reflectivity), offsetof(WorldVertex, uv),
+                                 offsetof(WorldVertex, lightmapUv)};
     for (std::uint32_t i = 0; i < attributes.size(); ++i) {
         attributes[i] = WGPU_VERTEX_ATTRIBUTE_INIT;
         attributes[i].format = WGPUVertexFormat_Float32x3;
         if (i == 3) attributes[i].format = WGPUVertexFormat_Float32;
-        if (i == 4) attributes[i].format = WGPUVertexFormat_Float32x2;
+        if (i >= 4) attributes[i].format = WGPUVertexFormat_Float32x2;
         attributes[i].offset = offsets[i];
         attributes[i].shaderLocation = i;
     }
@@ -238,7 +240,7 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mGltfMaterials.emplace(gpu);
         mGltfPipeline = BuildPipeline(gpu, format, shader.get(), layout, mShadowMap->SamplingLayout(),
                                       mSky->Environment().Layout(), mGltfMaterials->Layout(), false, true);
-        LoadGltfProps(root);
+        LoadGltfProps(root, scene.lightmapEnabled.has_value());
     }
 
     mClearColor = {0.89, 0.925, 0.941, 1.0};
@@ -374,19 +376,25 @@ void WorldRenderer::SyncProps(std::size_t count) {
 //————————————————————————————————————————————————————————————————————————————————
 // 按原型上传顶点与两张材质纹理，实例之间共享这些 GPU 资源。
 //————————————————————————————————————————————————————————————————————————————————
-void WorldRenderer::LoadGltfProps(const std::filesystem::path& root) {
+void WorldRenderer::LoadGltfProps(const std::filesystem::path& root, bool withLightmaps) {
     for (std::size_t i = 0; i < mGltfProps.size(); ++i) {
         const auto& asset = kPropAssets[i + kBuiltinPropCount];
+        if (asset.lightmap && !withLightmaps) continue;
         const auto source = LoadGltfAsset(root / asset.id);
+        TextureViewHandle atlas;
+        if (asset.lightmap) atlas = mGltfMaterials->UploadLightmap(ReadLightmap(root / asset.lightmap));
         auto& prototype = mGltfProps[i];
         for (const auto& material : source.materials) {
-            prototype.materials.push_back(mGltfMaterials->Upload(material));
+            prototype.materials.push_back(mGltfMaterials->Upload(material, atlas.get()));
         }
         for (const auto& primitive : source.primitives) {
+            if (asset.lightmap && !primitive.hasLightmapUv) {
+                throw std::runtime_error("Missing TEXCOORD_1 in baked prop.");
+            }
             std::vector<WorldVertex> vertices;
             vertices.reserve(primitive.vertices.size());
             for (const auto& vertex : primitive.vertices) {
-                vertices.push_back({vertex.geometry, 0.0f, vertex.uv});
+                vertices.push_back({vertex.geometry, 0.0f, vertex.uv, vertex.lightmapUv});
             }
             auto mesh = UploadMesh(vertices, nullptr, asset.name);
             prototype.meshes.push_back({std::move(mesh), primitive.material});
@@ -512,7 +520,10 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     }
     if (!showSpheres) {
         for (std::size_t i = 0; i < scene.props.size(); ++i) {
-            uploadUniform(mPropDraws[i], scene.props[i].transform.Matrix(), shadowControls);
+            const auto& prop = scene.props[i];
+            glm::vec4 material{0.0f};
+            if (scene.lightmapEnabled.value_or(false) && !prop.lightmap.empty()) material.w = kLightmapRange;
+            uploadUniform(mPropDraws[i], prop.transform.Matrix(), shadowControls, material);
         }
     }
     glm::vec4 terrainMaterial{0.0f};

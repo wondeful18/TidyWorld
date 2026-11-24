@@ -17,7 +17,7 @@
 
 namespace tinyworld {
 
-enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials, Shore };  // 布局和游览预设
+enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials, Shore, Porch };  // 布局和游览预设
 enum class MaterialView { Lit, Weights, Roughness, VertexColor };  // 地表材质的诊断通道
 enum class SkyMode { Cubemap, Panorama };  // 第四章的两种天空投影
 
@@ -76,6 +76,7 @@ struct MaterialPreview {
 // 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
+    static constexpr OrbitCamera kPorchCamera{{3.55f, 1.17f, 7.75f}, 24.0f, 22.0f, 9.0f};
     static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
     static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
     static constexpr std::size_t kCarIndex = 3;  // 小车排在三件常驻物体后面
@@ -104,6 +105,7 @@ struct WorldScene {
     bool canUseGltfProps{};  // 第十三章开启 glTF 原型与桥面查询
     std::optional<VegetationSettings> vegetation;  // 由样地或规则生成的植被参数
     std::optional<WaterSettings> water;  // 水面调试及运行时间
+    std::optional<bool> lightmapEnabled;  // 第十七章开启图集，值本身用于实时对照
     std::optional<AtmosphereSettings> atmosphere;  // 第十六章的雾和阴影距离预览
 
     //————————————————————————————————————————————————————————————————————————————————

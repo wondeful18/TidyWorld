@@ -88,6 +88,10 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.fogEnabled) scene.atmosphere->fogEnabled = *options.fogEnabled;
         if (options.shadowDistance) scene.atmosphere->shadowDistance = *options.shadowDistance;
     }
+    if (options.chapter >= Chapter::Lightmap) {
+        scene.lightmapEnabled = options.lightmapEnabled.value_or(true);
+        if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
+    }
     if (scenePath.empty()) {
         scene.ApplyPreset(options.worldPreset);
     } else {
@@ -101,6 +105,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.environmentOverrides) {
             scene.environment = options.environmentOverrides;
         }
+        if (options.worldPreset == WorldPreset::Porch) scene.camera = WorldScene::kPorchCamera;
         if (options.worldPreset == WorldPreset::Shore) scene.camera = WorldScene::kShoreCamera;
         scene.SetDriving(options.worldPreset == WorldPreset::Drive);
         scene.SetWalking(options.worldPreset == WorldPreset::Walk);
@@ -370,6 +375,9 @@ int RunApplication(const ApplicationOptions& options) {
     } else if (options.chapter == Chapter::Atmosphere) {
         title = "TinyWorld ch16 - Sun, Shadows and Distance Fog";
         ready = "Chapter 16 shared sky color, shadow distance and linear fog ready";
+    } else if (options.chapter == Chapter::Lightmap) {
+        title = "TinyWorld ch17 - Bake a Lightmap";
+        ready = "Chapter 17 CPU-baked porch lightmap and UV2 ready";
     }
     Window window(title, options.capturePath.empty() && !options.benchmarkVegetation);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");

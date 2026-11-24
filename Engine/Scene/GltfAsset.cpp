@@ -130,10 +130,12 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
     const auto* position = cgltf_find_accessor(&source, cgltf_attribute_type_position, 0);
     const auto* normal = cgltf_find_accessor(&source, cgltf_attribute_type_normal, 0);
     const auto* uv = cgltf_find_accessor(&source, cgltf_attribute_type_texcoord, 0);
+    const auto* bakeUv = cgltf_find_accessor(&source, cgltf_attribute_type_texcoord, 1);
     const bool textured = source.material && (source.material->pbr_metallic_roughness.base_color_texture.texture ||
                                              source.material->pbr_metallic_roughness.metallic_roughness_texture.texture);
     if (!position || position->type != cgltf_type_vec3 || !normal || normal->type != cgltf_type_vec3 ||
         (textured && !uv) || (uv && uv->type != cgltf_type_vec2) ||
+        (bakeUv && (bakeUv->type != cgltf_type_vec2 || bakeUv->count != position->count)) ||
         cgltf_find_accessor(&source, cgltf_attribute_type_color, 0)) {
         throw std::runtime_error("Expected POSITION/NORMAL and TEXCOORD_0 for textured meshes, without vertex colors.");
     }
@@ -150,6 +152,7 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
     const auto normalMatrix = glm::transpose(glm::inverse(glm::mat3(transform)));
     GltfPrimitive result;
     result.material = source.material ? static_cast<std::size_t>(source.material - model.materials) : model.materials_count;
+    result.hasLightmapUv = bakeUv != nullptr;
     result.vertices.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         // 镜像节点翻转绕序，背面剔除仍与法线一致。
@@ -160,10 +163,11 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
         }
         const auto index = source.indices ? cgltf_accessor_read_index(source.indices, corner) : corner;
         glm::vec3 p{}, n{};
-        glm::vec2 texcoord{};
+        glm::vec2 texcoord{0.0f}, chart{0.0f};
         if (index >= position->count || !cgltf_accessor_read_float(position, index, glm::value_ptr(p), 3) ||
             !cgltf_accessor_read_float(normal, index, glm::value_ptr(n), 3) ||
-            (uv && !cgltf_accessor_read_float(uv, index, glm::value_ptr(texcoord), 2))) {
+            (uv && !cgltf_accessor_read_float(uv, index, glm::value_ptr(texcoord), 2)) ||
+            (bakeUv && !cgltf_accessor_read_float(bakeUv, index, glm::value_ptr(chart), 2))) {
             throw std::runtime_error("Cannot read glTF vertex attributes.");
         }
         p = glm::vec3(transform * glm::vec4(p, 1.0f));
@@ -171,11 +175,11 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
         const float length = glm::length(n);
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
             !std::isfinite(length) || length < 1.0e-8f ||
-            !std::isfinite(texcoord.x) || !std::isfinite(texcoord.y)) {
+            !std::isfinite(texcoord.x) || !std::isfinite(texcoord.y) || !std::isfinite(chart.x) || !std::isfinite(chart.y)) {
             throw std::runtime_error("Expect finite positions, UVs and nonzero normals.");
         }
         n /= length;
-        result.vertices.push_back({{{p.x, p.y, p.z}, {n.x, n.y, n.z}, {1.0f, 1.0f, 1.0f}}, texcoord});
+        result.vertices.push_back({{{p.x, p.y, p.z}, {n.x, n.y, n.z}, {1.0f, 1.0f, 1.0f}}, texcoord, chart});
     }
     return result;
 }

@@ -63,6 +63,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Scene/GltfAsset.h
     Engine/Scene/OrbitCamera.cpp
     Engine/Scene/OrbitCamera.h
+    Engine/Scene/Lightmap.cpp
+    Engine/Scene/Lightmap.h
     Engine/Scene/PlacedProp.cpp
     Engine/Scene/PlacedProp.h
     Engine/Scene/PrimitiveMesh.h
@@ -184,6 +186,8 @@ set(sample_assets
     scenes/ch07/valley.json
     scenes/ch13/village.json
     scenes/ch15/coast.json
+    scenes/ch17/porch.json
+    models/ch17/porch.glb
     models/ch13/house.glb models/ch13/fence.glb models/ch13/bridge.glb
     materials/ch08/grass-color.png materials/ch08/grass-rough.png
     materials/ch08/gravel-color.png materials/ch08/gravel-rough.png
@@ -220,6 +224,21 @@ foreach(model ground tree house)
     )
     list(APPEND deployed_assets "${output}")
 endforeach()
+# 烘焙器走同一个 glTF 导入路径，模型变动时自动重建线性图集。
+add_executable(TinyWorldLightmapBaker Tools/LightmapBaker/main.cpp Tools/LightmapBaker/Bake.cpp)
+target_link_libraries(TinyWorldLightmapBaker PRIVATE TinyWorldEngine)
+target_compile_options(TinyWorldLightmapBaker PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+set(porch_model "${PROJECT_SOURCE_DIR}/Assets/Models/ch17/porch.glb")
+set(lightmap_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lightmaps/ch17")
+set(lightmap_output "${lightmap_dir}/porch.twlm")
+add_custom_command(OUTPUT "${lightmap_output}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${lightmap_dir}"
+    COMMAND $<TARGET_FILE:TinyWorldLightmapBaker> "${porch_model}" "${lightmap_output}.tmp"
+    COMMAND ${CMAKE_COMMAND} -E rename "${lightmap_output}.tmp" "${lightmap_output}"
+    DEPENDS TinyWorldLightmapBaker "${porch_model}"
+    VERBATIM
+)
+list(APPEND deployed_assets "${lightmap_output}")
 add_custom_target(TinyWorldAssets DEPENDS ${deployed_assets})
 add_dependencies(TinyWorld TinyWorldAssets)
 
@@ -234,13 +253,14 @@ add_custom_command(OUTPUT "${wgpu_runtime_output}"
 )
 add_custom_target(TinyWorldRuntime DEPENDS "${wgpu_runtime_output}")
 add_dependencies(TinyWorld TinyWorldRuntime)
+add_dependencies(TinyWorldLightmapBaker TinyWorldRuntime)
 if(APPLE)
-    set_target_properties(TinyWorld PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
+    set_target_properties(TinyWorld TinyWorldLightmapBaker PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
 endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(check Village Coast)
+    foreach(check Village Coast Lightmap)
         set(check_target TinyWorld${check}Checks)
         add_executable(${check_target} Tests/${check}Checks.cpp)
         target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
@@ -254,4 +274,7 @@ if(BUILD_TESTING)
     add_test(NAME VillageChecks
         COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME CoastChecks COMMAND TinyWorldCoastChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    target_sources(TinyWorldLightmapChecks PRIVATE Tools/LightmapBaker/Bake.cpp)
+    add_test(NAME LightmapChecks
+        COMMAND TinyWorldLightmapChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

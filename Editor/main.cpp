@@ -78,8 +78,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::Coast;
             } else if (value == "16") {
                 options.chapter = tinyworld::Chapter::Atmosphere;
+            } else if (value == "17") {
+                options.chapter = tinyworld::Chapter::Lightmap;
             } else {
-                std::cerr << "Choose chapter 01 through 16.\n";
+                std::cerr << "Choose chapter 01 through 17.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -96,8 +98,10 @@ int main(int argc, char** argv) {
                 options.worldPreset = tinyworld::WorldPreset::Materials;
             } else if (value == "shore") {
                 options.worldPreset = tinyworld::WorldPreset::Shore;
+            } else if (value == "porch") {
+                options.worldPreset = tinyworld::WorldPreset::Porch;
             } else {
-                std::cerr << "Choose preset overlap, evening, drive, walk, materials or shore.\n";
+                std::cerr << "Choose preset overlap, evening, drive, walk, materials, shore or porch.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--no-shadows" || argument == "--hard-shadows" || argument == "--shadow-bias") {
@@ -157,6 +161,13 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             options.waterTime = seconds;
+        } else if (argument == "--lightmap" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value != "on" && value != "off") {
+                std::cerr << "Choose lightmap on or off.\n";
+                return EXIT_FAILURE;
+            }
+            options.lightmapEnabled = value == "on";
         } else if (argument == "--fog" && index + 1 < argc) {
             const std::string_view value = argv[++index];
             if (value != "on" && value != "off") {
@@ -173,7 +184,7 @@ int main(int argc, char** argv) {
             }
             options.shadowDistance = metres;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..16] [--preset overlap|evening|drive|walk|materials|shore] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..17] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -186,7 +197,8 @@ int main(int argc, char** argv) {
                          "Chapter 11+: [--benchmark-vegetation]\n"
                          "Chapter 14+: [--water lit|depth|no-reflection|off] [--water-time seconds]\n"
                          "Chapter 15+: [--preset shore]\n"
-                         "Chapter 16: [--fog on|off] [--shadow-distance metres]\n";
+                         "Chapter 16+: [--fog on|off] [--shadow-distance metres]\n"
+                         "Chapter 17+: [--lightmap on|off] [--preset porch]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -218,6 +230,11 @@ int main(int argc, char** argv) {
     }
     if ((options.waterView || options.waterTime) && options.chapter < tinyworld::Chapter::Water) {
         std::cerr << "Water options require chapter 14.\n";
+        return EXIT_FAILURE;
+    }
+    if ((options.lightmapEnabled || options.worldPreset == tinyworld::WorldPreset::Porch) &&
+        options.chapter < tinyworld::Chapter::Lightmap) {
+        std::cerr << "Lightmap options require chapter 17 or later.\n";
         return EXIT_FAILURE;
     }
     if ((options.fogEnabled || options.shadowDistance) && options.chapter < tinyworld::Chapter::Atmosphere) {

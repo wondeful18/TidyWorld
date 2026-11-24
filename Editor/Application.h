@@ -7,7 +7,7 @@
 
 namespace tinyworld {
 
-enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water, Coast, Atmosphere };
+enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Materials, Road, Props, Meadow, Ecology, Village, Water, Coast, Atmosphere, Lightmap };
 
 //————————————————————————————————————————————————————————————————————————————————
 // 命令行选择演示内容、输出路径和验证方式。
@@ -28,6 +28,7 @@ struct ApplicationOptions {
     std::optional<float> waterTime;                 // 第十四章开始时的流水时间，单位为秒
     std::optional<WaterView> waterView;             // 第十四章固定机位对照的显示模式
     std::optional<bool> fogEnabled;                 // 第十六章固定机位的雾开关
+    std::optional<bool> lightmapEnabled;            // 第十七章固定机位的烘焙对照
     std::optional<float> shadowDistance;            // 第十六章阴影完全淡出的相机距离，米
     std::optional<EnvironmentSettings> environmentOverrides; // 第四章的背景模式和反射开关
 };

@@ -37,6 +37,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     const auto vegetationSettings = vegetation;
     const auto waterSettings = water;
     const auto atmosphereSettings = atmosphere;
+    const auto lightmapSetting = lightmapEnabled;
     *this = WorldScene{};
     // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
     shadows = shadowSettings;
@@ -55,6 +56,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     vegetation = vegetationSettings;
     water = waterSettings;
     atmosphere = atmosphereSettings;
+    lightmapEnabled = lightmapSetting;
     if (materials) {
         materials->spheres = false;
     }
@@ -86,6 +88,9 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
         break;
     case WorldPreset::Walk:
         SetWalking(true);
+        break;
+    case WorldPreset::Porch:
+        camera = kPorchCamera;
         break;
     case WorldPreset::Shore:
         camera = kShoreCamera;

@@ -108,7 +108,7 @@ WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePa
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
@@ -242,6 +242,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
         SelectForEditing(kWaterPanel);
+    }
+    if (mScene.lightmapEnabled && ImGui::Selectable("Baked lighting", mSelected == kLightmapPanel)) {
+        SelectForEditing(kLightmapPanel);
     }
     if (mScene.atmosphere && ImGui::Selectable("Atmosphere", mSelected == kAtmospherePanel)) {
         SelectForEditing(kAtmospherePanel);
@@ -399,6 +402,14 @@ void WorldEditor::DrawInspector() {
             ImGui::TextWrapped("Left to right: dielectric (0.24 / 0.62), metal (0.24 / 0.62).");
         } else if (materials->view == MaterialView::Weights) {
             ImGui::TextWrapped("Grass (green), gravel (red), rock (blue), sand (ochre).");
+        }
+        return;
+    }
+    if (auto& lightmap = mScene.lightmapEnabled; lightmap && mSelected == kLightmapPanel && !mSculptEnabled) {
+        ImGui::Checkbox("Porch lightmap", &*lightmap);
+        if (ImGui::Button("Porch view")) mScene.camera = WorldScene::kPorchCamera;
+        for (const auto& prop : mScene.props) {
+            if (!prop.lightmap.empty()) ImGui::TextWrapped("%s", prop.lightmap.c_str());
         }
         return;
     }
@@ -598,7 +609,8 @@ void WorldEditor::DrawPropsPalette() {
     const auto& style = ImGui::GetStyle();
     const float width = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
     ImGui::BeginDisabled(mScene.props.size() >= PlacedProp::kLimit);
-    const auto count = mScene.canUseGltfProps ? kPropAssets.size() : kBuiltinPropCount;
+    const auto count = mScene.lightmapEnabled ? kPropAssets.size() :
+                       mScene.canUseGltfProps ? kPorchAsset : kBuiltinPropCount;
     for (std::size_t i = 0; i < count; ++i) {
         if (i % 2 == 1) ImGui::SameLine();
         const bool armed = mPlacement == i;
@@ -637,7 +649,8 @@ void WorldEditor::DrawPropPlacement(PixelSize size) {
     if (!PickTerrain(field, vp, low, high, ImGui::GetIO().MousePos, hit)) return;
     BrushOutline(field, {hit.x, hit.z}, 0.55f, false, vp, low, high);
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && mScene.props.size() < PlacedProp::kLimit) {
-        mScene.props.push_back({*mPlacement, {hit}});
+        const auto* lightmap = kPropAssets[*mPlacement].lightmap;
+        mScene.props.push_back({*mPlacement, {hit}, lightmap ? lightmap : ""});
         SelectForEditing(kFirstProp + mScene.props.size() - 1);
         mGizmoMode = GizmoMode::Move;
     }

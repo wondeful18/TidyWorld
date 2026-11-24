@@ -25,7 +25,7 @@ void Require(bool passed, const char* message) {
 // 检查每个课程原型都有网格、底色和金属粗糙度贴图，桥面尺寸与碰撞约定一致。
 //————————————————————————————————————————————————————————————————————————————————
 void CheckModels(const std::filesystem::path& root) {
-    for (std::size_t i = kBuiltinPropCount; i < kPropAssets.size(); ++i) {
+    for (std::size_t i = kBuiltinPropCount; i < kPorchAsset; ++i) {
         const auto prototype = LoadGltfAsset(root / kPropAssets[i].id);
         Require(!prototype.primitives.empty(), "glTF must contain geometry.");
         for (const auto& primitive : prototype.primitives) {
