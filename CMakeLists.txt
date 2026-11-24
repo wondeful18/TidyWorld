@@ -64,6 +64,8 @@ add_library(TinyWorldEngine STATIC
     Engine/Scene/GltfAsset.h
     Engine/Scene/OrbitCamera.cpp
     Engine/Scene/OrbitCamera.h
+    Engine/Scene/Capstone.cpp
+    Engine/Scene/Capstone.h
     Engine/Scene/DayCycle.cpp
     Engine/Scene/DayCycle.h
     Engine/Scene/Lightmap.cpp
@@ -194,6 +196,7 @@ set(sample_assets
     scenes/ch13/village.json
     scenes/ch15/coast.json
     scenes/ch17/porch.json
+    scenes/ch21/tour.json
     models/ch17/porch.glb
     models/ch13/house.glb models/ch13/fence.glb models/ch13/bridge.glb
     materials/ch08/grass-color.png materials/ch08/grass-rough.png
@@ -267,7 +270,7 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(check Village Coast Lightmap DayCycle TerrainVisibility TerrainStreaming)
+    foreach(check Village Coast Lightmap DayCycle TerrainVisibility TerrainStreaming Capstone)
         set(check_target TinyWorld${check}Checks)
         add_executable(${check_target} Tests/${check}Checks.cpp)
         target_link_libraries(${check_target} PRIVATE TinyWorldEngine)
@@ -280,6 +283,8 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME VillageChecks
         COMMAND TinyWorldVillageChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME CapstoneChecks
+        COMMAND TinyWorldCapstoneChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME TerrainStreamingChecks COMMAND TinyWorldTerrainStreamingChecks)
     add_test(NAME TerrainVisibilityChecks COMMAND TinyWorldTerrainVisibilityChecks)
     add_test(NAME CoastChecks COMMAND TinyWorldCoastChecks "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")

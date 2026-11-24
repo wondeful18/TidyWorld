@@ -63,7 +63,7 @@ private:
     WebGpuContext& mGpu;
     std::array<Prototype, kVegetationKinds> mPrototypes;
     Instances mGlobal;                            // 早期章节的合批
-    std::array<Instances, HeightField::kChunkCount> mChunks; // 第二十章按块释放实例流
+    std::array<Instances, TerrainGrid::kMaxChunkCount> mChunks; // 第二十章按块释放实例流
     RoadMask mRoadMask;
     std::optional<RoadSpline> mRoad;
     std::optional<VegetationSettings> mSettings;

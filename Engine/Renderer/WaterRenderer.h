@@ -30,6 +30,7 @@ public:
     // 从不透明深度重建水下地形，再在已有颜色附件上叠画水面。
     // depthView 变化时重建采样绑定。通道不再把该视图当作可写附件。
     //————————————————————————————————————————————————————————————————————————————————
+    void SyncExtent(bool coast, float halfExtent);
     void Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
                 const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
                 glm::vec3 horizon, const FrameAtmosphere& air, glm::vec4 lighting);
@@ -43,6 +44,8 @@ private:
     WGPUTextureView mBoundDepth{};          // 用于比较的借用句柄，绑定组保有引用
     BufferHandle mVertices;                // 湖面与溪道连成一条三角形带
     BufferHandle mUniform;                 // 视图投影、逆矩阵、相机位置与显示模式
+    float mLastExtent{};
+    bool mLastCoast{};
     std::uint32_t mVertexCount{};           // 三角形列表的总顶点数
 };
 

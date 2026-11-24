@@ -29,6 +29,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     const bool lod = previewLod;
     const auto terrainPreviewSettings = terrainPreview;
     const bool streaming = streamTerrain;
+    const bool tour = capstone;
     const bool sculpting = canSculpt;
     const auto materialView = materials;
     auto paintMap = std::move(paint);
@@ -51,6 +52,7 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     previewLod = lod;
     terrainPreview = terrainPreviewSettings;
     streamTerrain = streaming;
+    capstone = tour;
     canSculpt = sculpting;
     materials = materialView;
     paint = std::move(paintMap);

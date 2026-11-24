@@ -1,5 +1,6 @@
 #include "Editor/Application.h"
 
+#include "Engine/Scene/Capstone.h"
 #include "Engine/Scene/DayCycle.h"
 
 #include "Editor/EditorUi.h"
@@ -17,6 +18,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <webgpu/wgpu.h>
+#include <glm/common.hpp>
 
 #include <algorithm>
 #include <array>
@@ -96,7 +98,9 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
     }
     if (options.chapter >= Chapter::DayCycle) scene.dayCycle.emplace();
-    scene.streamTerrain = options.chapter == Chapter::TerrainStreaming;
+    scene.capstone = options.chapter == Chapter::Capstone;
+    scene.streamTerrain = options.chapter >= Chapter::TerrainStreaming;
+    if (scene.capstone && options.scenePath.empty()) scenePath = root / "scenes" / "ch21" / "tour.json";
     if (options.chapter >= Chapter::TerrainVisibility) {
         scene.terrainPreview = TerrainPreview{options.terrainLod.value_or(true), options.terrainCull.value_or(true)};
     }
@@ -113,7 +117,7 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
         if (options.environmentOverrides) {
             scene.environment = options.environmentOverrides;
         }
-        if (scene.dayCycle && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
+        if (scene.dayCycle && !scene.capstone && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
             scene.camera = WorldScene::kDayCamera;
         }
         if (options.worldPreset == WorldPreset::Porch) scene.camera = WorldScene::kPorchCamera;
@@ -126,10 +130,11 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
     }
     if (scene.terrainPreview && !scene.IsWalking()) {
         if (options.terrainView) scene.camera = WorldScene::kTerrainRoute[*options.terrainView];
-        else if (options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
+        else if (!scene.capstone && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
             scene.camera = WorldScene::kTerrainRoute[1];
         }
     }
+    if (options.tourStop) scene.camera = kTourStops[*options.tourStop].camera;
     if (scene.dayCycle && options.dayHour) scene.dayCycle->hour = WrapDayHour(*options.dayHour);
     return scene;
 }
@@ -150,7 +155,7 @@ struct WorldDemo {
         : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
           editor(scene, options.scenePath, options.sculptTools || options.chapter == Chapter::Sculpt,
                  renderer.PaintPreviews(), &renderer.VegetationStatistics(), &renderer.TerrainStatistics(),
-                 &renderer.StreamStatistics()) {}
+                 &renderer.StreamStatistics(), &renderer.SceneDraws()) {}
 
     //————————————————————————————————————————————————————————————————————————————————
     // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
@@ -445,6 +450,105 @@ void BenchmarkStreaming(WebGpuContext& gpu, WorldDemo& world) {
                 stats.peakResident, stats.peakUploadedBytes, ChunkStreamer::kUploadsPerFrame);
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 在保存前和重开后用同一个步行控制器走完全程，并报告可复现的路线量。
+//————————————————————————————————————————————————————————————————————————————————
+void VerifyTour(const ApplicationOptions& options, const std::filesystem::path& root) {
+    auto scene = CreateWorldScene(options, root);
+    const auto original = WalkCapstone(scene);
+    scene.SetWalking(false);
+    SaveScene(options.tourVerificationPath, scene);
+    LoadScene(options.tourVerificationPath, scene);
+    const auto reopened = WalkCapstone(scene);
+    if (original.end != reopened.end || original.distance != reopened.distance ||
+        original.steps != reopened.steps || original.chunksVisited != reopened.chunksVisited) {
+        throw std::runtime_error("The reopened scene produced a different walk.");
+    }
+    std::printf("Tour before and after reload | %.2f m | %u unique chunks | %u input steps"
+                " | bridge yes | min water clearance %.3f m | finish %.2f,%.2f,%.2f\n",
+                reopened.distance, reopened.chunksVisited, reopened.steps, reopened.minimumWaterClearance,
+                reopened.end.x, reopened.end.y, reopened.end.z);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 对比两份场景在共同范围内的固定相机轨迹。开场加载和预热不进入采样。
+//————————————————————————————————————————————————————————————————————————————————
+void BenchmarkCapstone(WebGpuContext& gpu, const std::filesystem::path& root) {
+    using Clock = std::chrono::steady_clock;
+    using Milliseconds = std::chrono::duration<double, std::milli>;
+    constexpr PixelSize size{1280, 720};
+    constexpr std::array targets{glm::vec3{-1.0f, 1.0f, 18.0f}, glm::vec3{0.0f, 1.0f, 7.7f},
+                                 glm::vec3{0.0f, 1.0f, 0.0f}, glm::vec3{4.6f, 1.0f, -10.7f},
+                                 glm::vec3{15.7f, 1.6f, -13.2f}};
+    constexpr int framesPerLeg = 30;
+    constexpr int frameCount = (targets.size() - 1) * framesPerLeg;
+    FrameCapture target(gpu, size);
+    const auto sample = root / "scenes" / "ch17" / "porch.json";
+    ApplicationOptions options;
+    options.chapter = Chapter::Capstone;
+    options.scenePath = sample;
+    options.dayHour = 12.0f;
+    options.waterTime = 0.0f;
+    WorldDemo world(gpu, gpu.SurfaceFormat(), root, options);
+    const auto frame = [&] {
+        EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
+        if (!encoder) throw std::runtime_error("Cannot create tour benchmark encoder.");
+        world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
+        SubmitFrame(gpu, encoder.get());
+        wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
+        gpu.ProcessEvents();
+    };
+    const auto warm = [&] {
+        world.scene.camera = {targets.front(), -20.0f, 21.0f, 13.0f};
+        const auto deadline = Clock::now() + std::chrono::seconds(12);
+        frame();
+        while (!world.renderer.StreamingSettled()) {
+            if (Clock::now() >= deadline) throw std::runtime_error("Could not warm up the tour benchmark.");
+            world.renderer.WaitForChunkData();
+            frame();
+        }
+    };
+    for (const bool large : {false, true}) {
+        if (large) LoadScene(root / "scenes" / "ch21" / "tour.json", world.scene);
+        world.scene.dayCycle->hour = 12.0f;
+        warm();
+        for (int i = 0; i < 12; ++i) frame();
+        std::array<double, frameCount> elapsed{};
+        unsigned draws{}, peakDraws{}, live{}, peakLive{};
+        std::size_t peakBytes{};
+        for (int i = 0; i < frameCount; ++i) {
+            const int leg = i / framesPerLeg;
+            const float t = static_cast<float>(i % framesPerLeg + 1) / framesPerLeg;
+            world.scene.camera.target = glm::mix(targets[leg], targets[leg + 1], t);
+            const auto start = Clock::now();
+            frame();
+            elapsed[i] = Milliseconds(Clock::now() - start).count();
+            const auto& stream = world.renderer.StreamStatistics();
+            const auto calls = world.renderer.SceneDraws();
+            draws += calls;
+            live += stream.resident;
+            peakDraws = std::max(peakDraws, calls);
+            peakLive = std::max(peakLive, stream.resident);
+            peakBytes = std::max(peakBytes, stream.residentBytes);
+        }
+        std::sort(elapsed.begin(), elapsed.end());
+        std::printf("%s | %zu world chunks | %d frames | p50 %.3f ms | p95 %.3f ms"
+                    " | draws mean %.1f peak %u | resident mean %.1f peak %u | peak %zu bytes\n",
+                    large ? "Expanded 80 m" : "Sample 48 m", world.scene.terrain->Grid().ChunkCount(), frameCount,
+                    (elapsed[frameCount / 2 - 1] + elapsed[frameCount / 2]) * 0.5,
+                    elapsed[(frameCount * 95 + 99) / 100 - 1], double(draws) / frameCount, peakDraws,
+                    double(live) / frameCount, peakLive, peakBytes);
+    }
+    // 回切原样区，复用同一个 GPU 渲染器验证索引、边界和水面绑定。
+    LoadScene(sample, world.scene);
+    warm();
+    if (world.scene.terrain->Grid() != TerrainGrid{} ||
+        world.renderer.StreamStatistics().resident != 15u) {
+        throw std::runtime_error("The renderer did not restore the small streaming grid.");
+    }
+    std::puts("GPU grid reload: 48 m -> 80 m -> 48 m passed.");
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -454,9 +558,13 @@ void BenchmarkStreaming(WebGpuContext& gpu, WorldDemo& world) {
 int RunApplication(const ApplicationOptions& options) {
     Log log;
     const auto root = ExecutableDirectory();
+    if (!options.tourVerificationPath.empty()) {
+        VerifyTour(options, root);
+        return 0;
+    }
     if (!options.roadMaskPath.empty()) {
         const auto scene = CreateWorldScene(options, root);
-        ExportRoadMask(options.roadMaskPath, scene.road.value());
+        ExportRoadMask(options.roadMaskPath, scene.road.value(), scene.terrain->Grid());
         log.Write("ROAD", "wrote " + options.roadMaskPath.string());
         return 0;
     }
@@ -523,11 +631,20 @@ int RunApplication(const ApplicationOptions& options) {
         title = "TinyWorld ch20 - Stream Terrain Chunks";
         ready = "Chapter 20 background terrain, road and plant streaming ready";
     }
-    const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain || options.benchmarkStreaming;
+    if (options.chapter == Chapter::Capstone) {
+        title = "TinyWorld ch21 - Forest to Cape";
+        ready = "Chapter 21 expanded coast tour ready";
+    }
+    const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain ||
+                           options.benchmarkStreaming || options.benchmarkCapstone;
     Window window(title, options.capturePath.empty() && !benchmark);
     log.Write("APP", "GLFW window ready: 1280 x 720 logical units");
     WebGpuContext gpu(window, log);
     const auto format = options.direct || benchmark ? gpu.SurfaceFormat() : SceneViewport::kColorFormat;
+    if (options.benchmarkCapstone) {
+        BenchmarkCapstone(gpu, root);
+        return 0;
+    }
     Demo demo = CreateDemo(gpu, format, root, options);
     log.Write("GPU", ready);
     if (options.benchmarkStreaming) {

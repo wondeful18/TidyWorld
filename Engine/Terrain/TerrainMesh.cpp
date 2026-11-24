@@ -101,9 +101,10 @@ bool IsCoarseTerrainChunk(glm::ivec2 key, glm::vec3 eye) {
 std::vector<SceneVertex> MakeChunkBorders(const HeightField& field) {
     std::vector<SceneVertex> mesh;
     constexpr float halfWidth = 0.045f;
-    for (int key = HeightField::kFirstChunk + 1; key < HeightField::kEndChunk; ++key) {
+    const auto grid = field.Grid();
+    for (int key = grid.FirstKey() + 1; key < grid.EndKey(); ++key) {
         const float edge = key * HeightField::kChunkSize;
-        for (int i = HeightField::kFirstSample; i < HeightField::kLastSample; ++i) {
+        for (int i = grid.FirstSample(); i < grid.LastSample(); ++i) {
             const float low = i * HeightField::kSpacing;
             const float high = low + HeightField::kSpacing;
             const auto a = BorderVertex(field, {edge - halfWidth, low});

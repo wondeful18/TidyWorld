@@ -21,13 +21,6 @@ std::uint64_t NextRevision() {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 两轴全局样点编号转换为行优先偏移。
-//————————————————————————————————————————————————————————————————————————————————
-std::size_t SampleIndex(int ix, int iz) {
-    return (iz - HeightField::kFirstSample) * HeightField::kSampleCount + (ix - HeightField::kFirstSample);
-}
-
-//————————————————————————————————————————————————————————————————————————————————
 // 由离丘顶的距离生成一个平滑隆起。宽度与高度均以米计。
 //————————————————————————————————————————————————————————————————————————————————
 float Hill(float x, float z, float centerX, float centerZ, float width, float height) {
@@ -39,6 +32,30 @@ float Hill(float x, float z, float centerX, float centerZ, float width, float he
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
+// 样点和块分别按 Z 行存储，调用方传入已落在布局范围内的编号。
+//————————————————————————————————————————————————————————————————————————————————
+std::size_t TerrainGrid::SampleIndex(int x, int z) const {
+    return (z - FirstSample()) * SampleSide() + x - FirstSample();
+}
+
+glm::ivec2 TerrainGrid::Key(std::size_t index) const {
+    return {FirstKey() + static_cast<int>(index % Side()), FirstKey() + static_cast<int>(index / Side())};
+}
+
+std::size_t TerrainGrid::Index(glm::ivec2 key) const {
+    return (key.y - FirstKey()) * Side() + key.x - FirstKey();
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 世界坐标先钳位，再向下取整。正端点归到最后一个块。
+//————————————————————————————————————————————————————————————————————————————————
+glm::ivec2 TerrainGrid::KeyAt(glm::vec2 xz) const {
+    xz = glm::clamp(xz, glm::vec2{-HalfExtent()}, glm::vec2{HalfExtent()});
+    return {std::min(static_cast<int>(std::floor(xz.x / kChunkSize)), EndKey() - 1),
+            std::min(static_cast<int>(std::floor(xz.y / kChunkSize)), EndKey() - 1)};
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 生成小径中心线，让地表颜色顺着谷底缓慢转弯。
 //————————————————————————————————————————————————————————————————————————————————
 float TerrainTrailX(float z) {
@@ -48,37 +65,38 @@ float TerrainTrailX(float z) {
 //————————————————————————————————————————————————————————————————————————————————
 // 在整数网格上只计算一次每个样点。相邻块由此共享同一条边的端点高度。
 //————————————————————————————————————————————————————————————————————————————————
-HeightField::HeightField() {
-    for (int iz = kFirstSample; iz <= kLastSample; ++iz) {
-        for (int ix = kFirstSample; ix <= kLastSample; ++ix) {
+HeightField::HeightField(TerrainGrid grid)
+    : mGrid(grid), mHeights(grid.SampleSide() * grid.SampleSide()), mChunkRevisions(grid.ChunkCount()) {
+    for (int iz = mGrid.FirstSample(); iz <= mGrid.LastSample(); ++iz) {
+        for (int ix = mGrid.FirstSample(); ix <= mGrid.LastSample(); ++ix) {
             const float x = ix * kSpacing;
             const float z = iz * kSpacing;
             const float rise = 1.12f * std::sin(-0.23f * z) + 0.18f * std::sin(0.33f * x + 0.18f * z);
             const float west = Hill(x, z, -10.5f, -5.5f, 6.7f, 3.1f);
             const float east = Hill(x, z, 10.0f, -0.5f, 6.2f, 3.5f);
-            mHeights[SampleIndex(ix, iz)] = rise + west + east;
+            mHeights[mGrid.SampleIndex(ix, iz)] = rise + west + east;
         }
     }
-    Invalidate(glm::ivec2{kFirstSample}, glm::ivec2{kLastSample});
+    Invalidate(glm::ivec2{mGrid.FirstSample()}, glm::ivec2{mGrid.LastSample()});
 }
 
 //————————————————————————————————————————————————————————————————————————————————
 // 从世界样点编号换算数组里的 X、Z 索引。
 //————————————————————————————————————————————————————————————————————————————————
 float HeightField::Sample(int ix, int iz) const {
-    const int x = std::clamp(ix, kFirstSample, kLastSample);
-    const int z = std::clamp(iz, kFirstSample, kLastSample);
-    return mHeights[SampleIndex(x, z)];
+    const int x = std::clamp(ix, mGrid.FirstSample(), mGrid.LastSample());
+    const int z = std::clamp(iz, mGrid.FirstSample(), mGrid.LastSample());
+    return mHeights[mGrid.SampleIndex(x, z)];
 }
 
 //————————————————————————————————————————————————————————————————————————————————
 // 先定位单元格，再对斜边两侧的三角形分别做线性插值。
 //————————————————————————————————————————————————————————————————————————————————
 float HeightField::HeightAt(glm::vec2 xz) const {
-    const float sx = std::clamp(xz.x / kSpacing, static_cast<float>(kFirstSample), static_cast<float>(kLastSample));
-    const float sz = std::clamp(xz.y / kSpacing, static_cast<float>(kFirstSample), static_cast<float>(kLastSample));
-    const int ix = std::min(static_cast<int>(std::floor(sx)), kLastSample - 1);
-    const int iz = std::min(static_cast<int>(std::floor(sz)), kLastSample - 1);
+    const float sx = std::clamp(xz.x / kSpacing, static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
+    const float sz = std::clamp(xz.y / kSpacing, static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
+    const int ix = std::min(static_cast<int>(std::floor(sx)), mGrid.LastSample() - 1);
+    const int iz = std::min(static_cast<int>(std::floor(sz)), mGrid.LastSample() - 1);
     const float fx = sx - ix;
     const float fz = sz - iz;
 
@@ -96,10 +114,7 @@ float HeightField::HeightAt(glm::vec2 xz) const {
 // 用 floor 分配负坐标，避免把原点左侧的窄条误归给块 0。
 //————————————————————————————————————————————————————————————————————————————————
 glm::ivec2 HeightField::ChunkAt(glm::vec2 xz) {
-    xz.x = std::clamp(xz.x, -kHalfExtent, kHalfExtent);
-    xz.y = std::clamp(xz.y, -kHalfExtent, kHalfExtent);
-    return {std::min(static_cast<int>(std::floor(xz.x / kChunkSize)), kEndChunk - 1),
-            std::min(static_cast<int>(std::floor(xz.y / kChunkSize)), kEndChunk - 1)};
+    return TerrainGrid{}.KeyAt(xz);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -110,15 +125,15 @@ bool HeightField::ApplyBrush(glm::vec2 center, const TerrainBrush& brush, float 
         return false;
     }
     const auto low = glm::ivec2(glm::clamp(glm::floor((center - brush.radius) / kSpacing),
-                                           glm::vec2{kFirstSample}, glm::vec2{kLastSample}));
+                                           glm::vec2{static_cast<float>(mGrid.FirstSample())}, glm::vec2{static_cast<float>(mGrid.LastSample())}));
     const auto high = glm::ivec2(glm::clamp(glm::ceil((center + brush.radius) / kSpacing),
-                                            glm::vec2{kFirstSample}, glm::vec2{kLastSample}));
+                                            glm::vec2{static_cast<float>(mGrid.FirstSample())}, glm::vec2{static_cast<float>(mGrid.LastSample())}));
     const auto before = mHeights;
-    glm::ivec2 changedLow{kLastSample};
-    glm::ivec2 changedHigh{kFirstSample};
+    glm::ivec2 changedLow{mGrid.LastSample()};
+    glm::ivec2 changedHigh{mGrid.FirstSample()};
     const auto previous = [&](int x, int z) {
-        return before[SampleIndex(std::clamp(x, kFirstSample, kLastSample),
-                                  std::clamp(z, kFirstSample, kLastSample))];
+        return before[mGrid.SampleIndex(std::clamp(x, mGrid.FirstSample(), mGrid.LastSample()),
+                                  std::clamp(z, mGrid.FirstSample(), mGrid.LastSample()))];
     };
     for (int z = low.y; z <= high.y; ++z) {
         for (int x = low.x; x <= high.x; ++x) {
@@ -128,7 +143,7 @@ bool HeightField::ApplyBrush(glm::vec2 center, const TerrainBrush& brush, float 
             if (weight == 0.0f) {
                 continue;
             }
-            auto& height = mHeights[SampleIndex(x, z)];
+            auto& height = mHeights[mGrid.SampleIndex(x, z)];
             const float amount = weight * brush.strength * seconds;
             float next{};
             switch (brush.mode) {
@@ -170,8 +185,8 @@ bool HeightField::Raycast(glm::vec3 origin, glm::vec3 direction, glm::vec3& hit)
     float nearest = std::numeric_limits<float>::infinity();
     const auto gridOrigin = glm::vec2{origin.x, origin.z} / kSpacing;
     const auto dxz = glm::vec2{direction.x, direction.z} / kSpacing;
-    for (int z = kFirstSample; z < kLastSample; ++z) {
-        for (int x = kFirstSample; x < kLastSample; ++x) {
+    for (int z = mGrid.FirstSample(); z < mGrid.LastSample(); ++z) {
+        for (int x = mGrid.FirstSample(); x < mGrid.LastSample(); ++x) {
             const auto oxz = gridOrigin - glm::vec2{x, z};
             const float a = Sample(x, z);
             const float b = Sample(x + 1, z);
@@ -208,13 +223,14 @@ bool HeightField::Raycast(glm::vec3 origin, glm::vec3 direction, glm::vec3& hit)
 // 整表校验成功才替换，调用者可继续使用已有的高度场对象。
 //————————————————————————————————————————————————————————————————————————————————
 void HeightField::ReplaceSamples(const Samples& samples) {
+    if (samples.size() != mHeights.size()) throw std::runtime_error("Invalid terrain sample count.");
     for (const auto height : samples) {
         if (!std::isfinite(height) || std::abs(height) > kHeightLimit) {
             throw std::runtime_error("Terrain sample height is out of range.");
         }
     }
     mHeights = samples;
-    Invalidate(glm::ivec2{kFirstSample}, glm::ivec2{kLastSample});
+    Invalidate(glm::ivec2{mGrid.FirstSample()}, glm::ivec2{mGrid.LastSample()});
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -225,8 +241,8 @@ void HeightField::Invalidate(glm::ivec2 low, glm::ivec2 high) {
     low -= 1;
     high += 1;
     std::size_t index = 0;
-    for (int z = kFirstChunk; z < kEndChunk; ++z) {
-        for (int x = kFirstChunk; x < kEndChunk; ++x, ++index) {
+    for (int z = mGrid.FirstKey(); z < mGrid.EndKey(); ++z) {
+        for (int x = mGrid.FirstKey(); x < mGrid.EndKey(); ++x, ++index) {
             const glm::ivec2 start = glm::ivec2{x, z} * kCellsPerChunk;
             const glm::ivec2 end = start + kCellsPerChunk;
             if (start.x <= high.x && end.x >= low.x && start.y <= high.y && end.y >= low.y) {

@@ -270,14 +270,15 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
         mCabin = UploadMesh(WithReflectivity(MakeCabinMesh()), layout, "Cabin");
     }
     if (terrain) {
+        mTerrainGrid = terrain->Grid();
         if (scene.streamTerrain) mStream.emplace();
         for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
             mRobotLimbs[i] = UploadMesh(WithReflectivity(MakeRobotLimb(static_cast<RobotLimb>(i))), layout, "Robot limb");
         }
         if (mStream) {
             // 分配索引槽而不是 GPU 顶点。第一个请求由 Encode 的视点决定。
-            mTerrainDraws.resize(HeightField::kChunkCount);
-            mCoarseTerrainDraws.resize(HeightField::kChunkCount);
+            mTerrainDraws.resize(mTerrainGrid.ChunkCount());
+            mCoarseTerrainDraws.resize(mTerrainGrid.ChunkCount());
             mRoadMesh.emplace(MakeDrawBinding(layout));
         } else {
             for (int z = HeightField::kFirstChunk; z < HeightField::kEndChunk; ++z) {
@@ -342,7 +343,23 @@ void WorldRenderer::SyncTerrainBorders(const HeightField& field, bool showBorder
 //————————————————————————————————————————————————————————————————————————————————
 void WorldRenderer::SyncStreamedTerrain(const WorldScene& scene) {
     const auto focus = scene.IsWalking() ? scene.WalkerPose().position : scene.camera.target;
-    mStream->Update(HeightField::ChunkAt({focus.x, focus.z}), *scene.terrain, scene.road, *scene.vegetation);
+    const auto grid = scene.terrain->Grid();
+    if (grid != mTerrainGrid) {
+        // 同一数组槽在新行宽下对应不同的键，必须先清空旧资源。
+        for (std::size_t index = 0; index < mTerrainDraws.size(); ++index) mVegetation->EvictChunk(index);
+        mTerrainDraws.clear();
+        mCoarseTerrainDraws.clear();
+        mTerrainDraws.resize(grid.ChunkCount());
+        mCoarseTerrainDraws.resize(grid.ChunkCount());
+        mStreamRoadDraws = decltype(mStreamRoadDraws)();
+        mChunkBytes.fill(0);
+        mStreamStats = {};
+        mTerrainGrid = grid;
+        mChunkBorders.emplace(UploadMesh(WithReflectivity(MakeChunkBorders(*scene.terrain)),
+                                         mObjectLayout.get(), "Chunk borders"));
+        mBorderRevision = scene.terrain->Revision();
+    }
+    mStream->Update(grid.KeyAt({focus.x, focus.z}), *scene.terrain, scene.road, *scene.vegetation);
     auto& stats = mStreamStats;
     stats.uploaded = 0;
     stats.uploadedBytes = 0;
@@ -530,12 +547,14 @@ void WorldRenderer::ResizeDepth(PixelSize size) {
 //————————————————————————————————————————————————————————————————————————————————
 void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size,
                            const WorldScene& scene) {
+    mSceneDraws = 0;
     ResizeDepth(size);
     SyncProps(scene.props.size());
     if (mMaterials && scene.paint) {
         mMaterials->SyncPaint(mGpu.Queue(), *scene.paint);
     }
     if (const auto* terrain = scene.Terrain()) {
+        if (mWater) mWater->SyncExtent(scene.water->coast, terrain->Grid().HalfExtent());
         if (mStream) {
             SyncStreamedTerrain(scene);
             SyncTerrainBorders(*terrain, scene.showChunkBorders);
@@ -564,7 +583,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const bool cull = scene.terrainPreview && scene.terrainPreview->cull;
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
         if (!mTerrainDraws[i].count) continue;
-        mCoarseChoice[i] = useLod && IsCoarseTerrainChunk(TerrainKey(i), eye);
+        mCoarseChoice[i] = useLod && IsCoarseTerrainChunk(mTerrainGrid.Key(i), eye);
         mTerrainVisible[i] = !cull || IntersectsTerrainFrustum(frustum, mTerrainBounds[i]);
     }
     const auto light = scene.dayCycle ? EvaluateDaylight(scene.dayCycle->hour) : Daylight{scene.sun};
@@ -635,7 +654,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     glm::vec4 terrainMaterial{0.0f};
     if (scene.materials && scene.materials->view != MaterialView::VertexColor) {
         terrainMaterial = {1.0f, static_cast<float>(scene.materials->view), scene.road ? 0.0f : 1.0f,
-                           2.0f * HeightField::kHalfExtent};
+                           2.0f * mTerrainGrid.HalfExtent()};
     }
     for (std::size_t i = 0; i < mTerrainDraws.size(); ++i) {
         if (!mTerrainDraws[i].count) continue;
@@ -678,6 +697,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
             wgpuRenderPassEncoderSetPipeline(depthPass.get(), mShadowMap->VegetationPipeline());
             wgpuRenderPassEncoderSetBindGroup(depthPass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
             mVegetationStats.shadowDraws = DrawVegetation(depthPass.get(), scene.vegetation->instanced, true);
+            mSceneDraws += mVegetationStats.shadowDraws;
         }
         wgpuRenderPassEncoderEnd(depthPass.get());
     }
@@ -719,13 +739,16 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 0, mVegetationUniform.binding.get(), 0, nullptr);
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
         mVegetationStats.colorDraws = DrawVegetation(pass.get(), scene.vegetation->instanced, false);
+        mSceneDraws += mVegetationStats.colorDraws;
     }
     if (mSky && scene.environment) {
         mSky->Draw(pass.get(), projection, view, scene.environment->sky, horizon, light.nightMix);
+        ++mSceneDraws;
     }
     wgpuRenderPassEncoderEnd(pass.get());
     if (showWater) {
         mWater->Encode(encoder, target, mDepthView.get(), vp, eye, *scene.water, glm::vec3(horizon), air, lighting);
+        ++mSceneDraws;
     }
 }
 
@@ -771,12 +794,12 @@ void WorldRenderer::DrawObjects(WGPURenderPassEncoder pass, std::size_t visibleC
 // 根据原型选择几何，深度通道只读顶点和实例变换。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldRenderer::DrawProps(WGPURenderPassEncoder pass, const std::vector<PlacedProp>& props,
-                              PropPass type) const {
+                              PropPass type) {
     const std::array builtins{&mRock, &mDraws[1], &mDraws[2], &mCabin};
     for (std::size_t i = 0; i < props.size(); ++i) {
         if (mStream) {
             const auto p = props[i].transform.position;
-            if (!mTerrainDraws[TerrainIndex(HeightField::ChunkAt({p.x, p.z}))].count) continue;
+            if (!mTerrainDraws[mTerrainGrid.Index(mTerrainGrid.KeyAt({p.x, p.z}))].count) continue;
         }
         const auto asset = props[i].asset;
         const auto instance = mPropDraws[i].binding.get();
@@ -801,6 +824,7 @@ void WorldRenderer::DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh, W
     wgpuRenderPassEncoderSetBindGroup(pass, 0, instance ? instance : mesh.binding.get(), 0, nullptr);
     wgpuRenderPassEncoderSetVertexBuffer(pass, 0, mesh.vertices.get(), 0, mesh.count * sizeof(WorldVertex));
     wgpuRenderPassEncoderDraw(pass, mesh.count, 1, 0, 0);
+    ++mSceneDraws;
 }
 
 }  // namespace tinyworld

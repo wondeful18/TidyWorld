@@ -5,23 +5,19 @@
 #include <algorithm>
 
 namespace tinyworld {
-namespace {
-constexpr int kWidth = HeightField::kEndChunk - HeightField::kFirstChunk;
-}
 
 //————————————————————————————————————————————————————————————————————————————————
 // 索引增量首先沿 X，行进到末尾后沿 Z 换行。
 //————————————————————————————————————————————————————————————————————————————————
 glm::ivec2 TerrainKey(std::size_t index) {
-    return {HeightField::kFirstChunk + static_cast<int>(index % kWidth),
-            HeightField::kFirstChunk + static_cast<int>(index / kWidth)};
+    return TerrainGrid{}.Key(index);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
 // 调用方传入样区范围内的块键。
 //————————————————————————————————————————————————————————————————————————————————
 std::size_t TerrainIndex(glm::ivec2 key) {
-    return (key.y - HeightField::kFirstChunk) * kWidth + key.x - HeightField::kFirstChunk;
+    return TerrainGrid{}.Index(key);
 }
 
 //————————————————————————————————————————————————————————————————————————————————

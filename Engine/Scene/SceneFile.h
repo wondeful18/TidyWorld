@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Terrain/HeightField.h"
+
 #include <filesystem>
 
 namespace tinyworld {
@@ -20,6 +22,7 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene);
 //————————————————————————————————————————————————————————————————————————————————
 // 将当前道路可用的植被避让遮罩写为二值 PGM，保留已有文件至写入成功。
 //————————————————————————————————————————————————————————————————————————————————
-void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road);
+void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road,
+                    TerrainGrid grid = TerrainGrid{});
 
 }  // namespace tinyworld

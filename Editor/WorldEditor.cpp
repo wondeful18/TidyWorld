@@ -1,5 +1,6 @@
 #include "Editor/WorldEditor.h"
 
+#include "Engine/Scene/Capstone.h"
 #include "Engine/Scene/DayCycle.h"
 #include "Engine/Terrain/ChunkStreamer.h"
 
@@ -106,18 +107,19 @@ void BrushOutline(const HeightField& field, glm::vec2 center, float radius, bool
 //————————————————————————————————————————————————————————————————————————————————
 WorldEditor::WorldEditor(WorldScene& scene, const std::filesystem::path& scenePath, bool sculpt,
                          MaterialPreviews previews, const VegetationDrawStats* vegetationStats,
-                         const TerrainDrawStats* terrainStats, const TerrainStreamStats* streamStats)
+                         const TerrainDrawStats* terrainStats, const TerrainStreamStats* streamStats,
+                         const unsigned* sceneDraws)
     : mScene(scene), mPreviews(previews), mVegetationStats(vegetationStats), mStreamStats(streamStats),
-      mTerrainStats(terrainStats), mSculptEnabled(sculpt && scene.canSculpt) {
+      mSceneDraws(sceneDraws), mTerrainStats(terrainStats), mSculptEnabled(sculpt && scene.canSculpt) {
     if (mScene.shadows) {
         mSelected.reset();
     }
     if (mScene.spawn) {
-        mSelected = mScene.terrainPreview ? kTerrainPanel : mScene.dayCycle ? kDayCyclePanel : mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
+        mSelected = mScene.capstone ? kTourPanel : mScene.terrainPreview ? kTerrainPanel : mScene.dayCycle ? kDayCyclePanel : mScene.lightmapEnabled ? kLightmapPanel : mScene.atmosphere ? kAtmospherePanel : mScene.water ? kWaterPanel : mScene.canUseGltfProps ? kPropsPanel
             : mScene.vegetation ? kVegetationPanel : mScene.canPlaceProps ? kPropsPanel : mScene.road ? kRoadPanel
             : mScene.materials ? kMaterialPanel : WorldScene::kObjectCount;
         const auto text = scenePath.empty()
-            ? std::u8string{mScene.water && mScene.water->coast ? u8"coast-ch15.json"
+            ? std::u8string{mScene.capstone ? u8"tour-ch21.json" : mScene.water && mScene.water->coast ? u8"coast-ch15.json"
                 : mScene.water ? u8"valley-ch14.json" : mScene.canUseGltfProps ? u8"village-ch13.json"
                 : mScene.vegetation ? (mScene.vegetation->mode == VegetationMode::TerrainRules
                                                 ? u8"valley-ch12.json" : u8"valley-ch11.json")
@@ -247,6 +249,9 @@ void WorldEditor::DrawHierarchy() {
     }
     if (mScene.water && ImGui::Selectable("Water", mSelected == kWaterPanel)) {
         SelectForEditing(kWaterPanel);
+    }
+    if (mScene.capstone && ImGui::Selectable("Forest to Cape", mSelected == kTourPanel)) {
+        SelectForEditing(kTourPanel);
     }
     if (mScene.terrainPreview && ImGui::Selectable("Terrain performance", mSelected == kTerrainPanel)) {
         SelectForEditing(kTerrainPanel);
@@ -416,6 +421,26 @@ void WorldEditor::DrawInspector() {
         }
         return;
     }
+    if (mScene.capstone && mSelected == kTourPanel && !mSculptEnabled) {
+        const auto grid = mScene.terrain->Grid();
+        ImGui::Text("%d x %d chunks | %.0f m wide", grid.Side(), grid.Side(), grid.HalfExtent() * 2.0f);
+        if (ImGui::Button(mScene.IsWalking() ? "Stop walking" : "Walk from start")) {
+            mScene.SetWalking(!mScene.IsWalking());
+            if (mScene.IsWalking()) ImGui::SetWindowFocus("Scene Viewport");
+        }
+        ImGui::BeginDisabled(mScene.IsWalking() || grid != TerrainGrid(true));
+        for (std::size_t i = 0; i < kTourStops.size(); ++i) {
+            if (i % 2 == 1) ImGui::SameLine();
+            const auto& stop = kTourStops[i];
+            if (ImGui::Button(stop.label)) mScene.camera = stop.camera;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::Button("Noon")) *mScene.dayCycle = {12.0f, false};
+        ImGui::SameLine();
+        if (ImGui::Button("Night")) *mScene.dayCycle = {21.0f, false};
+        if (mSceneDraws) ImGui::Text("Scene draw calls: %u", *mSceneDraws);
+        return;
+    }
     if (auto& terrain = mScene.terrainPreview; terrain && mSelected == kTerrainPanel && !mSculptEnabled) {
         ImGui::Checkbox("Distance LOD", &terrain->lod);
         ImGui::Checkbox("Camera frustum culling", &terrain->cull);
@@ -537,8 +562,8 @@ void WorldEditor::DrawInspector() {
     if (mScene.spawn && mSelected == WorldScene::kObjectCount) {
         auto& spawn = *mScene.spawn;
         ImGui::SeparatorText("Walk spawn");
-        const float limitX = mScene.terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitX;
-        const float limitZ = mScene.terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitZ;
+        const float limitX = mScene.terrain ? mScene.terrain->Grid().WalkLimit() : WalkSpawn::kLimitX;
+        const float limitZ = mScene.terrain ? mScene.terrain->Grid().WalkLimit() : WalkSpawn::kLimitZ;
         ImGui::SliderFloat(mScene.terrain ? "World X (m)" : "Ground X (m)", &spawn.groundXZ.x, -limitX, limitX,
                            "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat(mScene.terrain ? "World Z (m)" : "Ground Z (m)", &spawn.groundXZ.y, -limitZ, limitZ,
@@ -767,7 +792,7 @@ void WorldEditor::DrawViewport(PixelSize size, float deltaSeconds) {
     char terrainHint[160]{};
     if (mScene.terrain && !spheres) {
         const auto feet = mScene.WalkerPose().position;
-        const auto key = HeightField::ChunkAt({feet.x, feet.z});
+        const auto key = mScene.terrain->Grid().KeyAt({feet.x, feet.z});
         const bool coarse = mScene.previewLod && IsCoarseTerrainChunk(key, mScene.ActiveCamera().Position());
         std::snprintf(terrainHint, sizeof(terrainHint), "%s\n%s chunk (%d, %d)   feet Y %.2f m%s",
                       hint, walking ? "Robot" : "Spawn", key.x, key.y, static_cast<double>(feet.y),
@@ -915,7 +940,7 @@ void WorldEditor::DrawMaterialBrush(PixelSize size, float deltaSeconds) {
     const glm::vec2 center{hit.x, hit.z};
     mPaintDragging |= ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     if (mPaintDragging) {
-        mScene.paint->Paint(center, mMaterialBrush, std::clamp(deltaSeconds, 0.0f, 0.05f));
+        mScene.paint->Paint(center, mMaterialBrush, std::clamp(deltaSeconds, 0.0f, 0.05f), field.Grid().HalfExtent());
     }
     BrushOutline(field, center, mMaterialBrush.radius, mMaterialBrush.square, vp, low, high);
 }
@@ -933,11 +958,12 @@ void WorldEditor::DrawRoadInspector() {
         mRoadPoint = static_cast<std::size_t>(selected - 1);
     }
     auto& point = road.points[mRoadPoint];
-    ImGui::DragFloat("World X (m)", &point.x, 0.05f, -RoadSpline::kPointLimit, RoadSpline::kPointLimit,
+    const float pointLimit = mScene.terrain->Grid().HalfExtent() - 0.5f;
+    ImGui::DragFloat("World X (m)", &point.x, 0.05f, -pointLimit, pointLimit,
                      "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::DragFloat("Y offset (m)", &point.y, 0.05f, -RoadSpline::kHeightOffsetLimit, RoadSpline::kHeightOffsetLimit,
                      "%.2f", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::DragFloat("World Z (m)", &point.z, 0.05f, -RoadSpline::kPointLimit, RoadSpline::kPointLimit,
+    ImGui::DragFloat("World Z (m)", &point.z, 0.05f, -pointLimit, pointLimit,
                      "%.2f", ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Width (m)", &road.width, RoadSpline::kMinimumWidth, RoadSpline::kMaximumWidth,
                        "%.2f", ImGuiSliderFlags_AlwaysClamp);
@@ -973,7 +999,7 @@ void WorldEditor::DrawRoadInspector() {
             std::filesystem::path path(std::u8string(text.begin(), text.end()));
             path = path.filename().empty() ? std::filesystem::path("road-avoidance.pgm")
                                            : path.replace_extension(".avoidance.pgm");
-            ExportRoadMask(path, road);
+            ExportRoadMask(path, road, mScene.terrain->Grid());
             const auto name = path.filename().u8string();
             mRoadStatus = "Exported " + std::string(name.begin(), name.end());
         } catch (const std::exception& error) {
@@ -1002,7 +1028,8 @@ void WorldEditor::DrawRoadEditor(PixelSize size) {
     };
     const auto toScreen = [&](glm::vec3 p, ImVec2& marker) { return ViewportPoint(toWorld(p), vp, low, high, marker); };
     auto* list = ImGui::GetWindowDrawList();
-    for (const auto& path : {road.Centerline(), road.Branch()}) {
+    const float pointLimit = field.Grid().HalfExtent() - 0.5f;
+    for (const auto& path : {road.Centerline(), road.Branch(pointLimit)}) {
         ImVec2 last{};
         bool lastVisible = false;
         for (const auto point : path) {
@@ -1030,7 +1057,7 @@ void WorldEditor::DrawRoadEditor(PixelSize size) {
     if (clicked && io.KeyShift && !ImGuizmo::IsUsingAny()) {
         glm::vec3 hit;
         if (road.points.size() < RoadSpline::kMaxPoints && PickTerrain(field, vp, low, high, mouse, hit)) {
-            const auto xz = glm::clamp(glm::vec2{hit.x, hit.z}, -RoadSpline::kPointLimit, RoadSpline::kPointLimit);
+            const auto xz = glm::clamp(glm::vec2{hit.x, hit.z}, -pointLimit, pointLimit);
             ++mRoadPoint;
             if (road.junctionPoint >= mRoadPoint) ++road.junctionPoint;
             road.points.insert(road.points.begin() + static_cast<std::ptrdiff_t>(mRoadPoint), {xz.x, 0.0f, xz.y});
@@ -1050,7 +1077,7 @@ void WorldEditor::DrawRoadEditor(PixelSize size) {
     auto model = Transform{origin, {0.0f, mRoadHeading, 0.0f}}.Matrix();
     if (ManipulateLocal(camera, size, ImGuizmo::TRANSLATE, kRoadPanel, model)) {
         const auto delta = glm::vec3(model[3]) - origin;
-        const glm::vec3 limit{RoadSpline::kPointLimit, RoadSpline::kHeightOffsetLimit, RoadSpline::kPointLimit};
+        const glm::vec3 limit{pointLimit, RoadSpline::kHeightOffsetLimit, pointLimit};
         // 横向拖动只改 XZ。地面在新位置的高度由地形重新求得。
         selected = glm::clamp(selected + delta, -limit, limit);
     }

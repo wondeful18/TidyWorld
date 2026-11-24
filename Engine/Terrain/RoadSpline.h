@@ -42,15 +42,19 @@ struct RoadSpline {
     //————————————————————————————————————————————————————————————————————————————————
     // 用主路控制点与近似切线生成共用同一节点的支路。
     //————————————————————————————————————————————————————————————————————————————————
-    [[nodiscard]] std::vector<glm::vec3> Branch() const;
+    [[nodiscard]] std::vector<glm::vec3> Branch(float pointLimit = kPointLimit) const;
 };
 
 //————————————————————————————————————————————————————————————————————————————————
 // 道路和路肩在整个高度场的二值覆盖，按 Z 行存储。
 //————————————————————————————————————————————————————————————————————————————————
 struct RoadMask {
-    static constexpr int kSide = static_cast<int>(2.0f * HeightField::kHalfExtent / 0.25f);
-    std::array<std::uint8_t, kSide * kSide> pixels{};  // 0 可种植，255 避让
+    static constexpr float kSpacing = 0.25f;
+    explicit RoadMask(TerrainGrid layout = TerrainGrid{})
+        : grid(layout), pixels(Side() * Side()) {}
+    [[nodiscard]] int Side() const { return static_cast<int>(2.0f * grid.HalfExtent() / kSpacing); }
+    TerrainGrid grid;
+    std::vector<std::uint8_t> pixels;  // 0 可种植，255 避让
     [[nodiscard]] bool Blocks(glm::vec2 xz, float radius = 0.0f) const;
 };
 
@@ -64,6 +68,6 @@ inline constexpr float kRoadOffset = 0.028f;  // 路面在对应地形三角面�
 //————————————————————————————————————————————————————————————————————————————————
 // 用每个像素中心到折线的最近距离生成避让遮罩。
 //————————————————————————————————————————————————————————————————————————————————
-[[nodiscard]] RoadMask MakeRoadMask(const RoadSpline& road);
+[[nodiscard]] RoadMask MakeRoadMask(const RoadSpline& road, TerrainGrid grid = TerrainGrid{});
 
 }  // namespace tinyworld

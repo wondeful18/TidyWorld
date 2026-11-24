@@ -37,8 +37,8 @@ static_assert(sizeof(WaterUniform) == 224);
 //————————————————————————————————————————————————————————————————————————————————
 // 用同一条水带从溪谷经过湖泊。海岸模式把东端逐渐扩宽到整片海面。
 //————————————————————————————————————————————————————————————————————————————————
-std::vector<glm::vec3> MakeWaterMesh(bool coast) {
-    const auto section = [coast](float x) {
+std::vector<glm::vec3> MakeWaterMesh(bool coast, float limit) {
+    const auto section = [coast, limit](float x) {
         const float offset = (x - 10.0f) / 5.9f;
         const float spread = (x - 10.0f) / 5.8f;
         float center = -0.83f * std::sin(x * 0.19f) - 1.4f * std::exp(-offset * offset);
@@ -53,17 +53,17 @@ std::vector<glm::vec3> MakeWaterMesh(bool coast) {
             const float offshore = glm::smoothstep(17.5f, WaterSettings::kCoastEnd, x);
             width = glm::max(width, glm::mix(2.0f, 180.0f, offshore));
         }
-        const float limit = HeightField::kHalfExtent;
         return std::array{glm::vec3{x, WaterSettings::kLevel, coast ? glm::max(-limit, center - width) : center - width},
                           glm::vec3{x, WaterSettings::kLevel, coast ? glm::min(limit, center + width) : center + width}};
     };
 
     std::vector<glm::vec3> vertices;
-    auto left = section(-24.0f);
+    auto left = section(-limit);
     // 岸边延续半米分段，在世界 X = 25 米处与海面拼接。
-    const int strips = coast ? 98 : 96;
+    const float east = coast ? WaterSettings::kCoastEnd : limit;
+    const int strips = static_cast<int>((east + limit) / HeightField::kSpacing);
     for (int i = 1; i <= strips; ++i) {
-        const auto right = section(-24.0f + 0.5f * i);
+        const auto right = section(-limit + HeightField::kSpacing * i);
         vertices.insert(vertices.end(), {left[0], left[1], right[0], right[0], left[1], right[1]});
         left = right;
     }
@@ -75,7 +75,7 @@ std::vector<glm::vec3> MakeWaterMesh(bool coast) {
             vertices.insert(vertices.end(), {a, b, c, c, b, d});
         };
         constexpr float edge = WaterSettings::kCoastFar + 70.0f;
-        constexpr float side = HeightField::kHalfExtent;
+        const float side = limit;
         constexpr float join = WaterSettings::kCoastEnd;
         addRectangle(join, edge, -edge, edge);
         addRectangle(-edge, join, -edge, -side);
@@ -159,12 +159,22 @@ WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const
     gpu.CheckValidation("water render pipeline");
     if (!mLayout || !pipelineLayout || !mPipeline) throw std::runtime_error("Cannot create water pipeline.");
 
-    const auto mesh = MakeWaterMesh(coast);
+    mUniform = MakeWaterBuffer(mGpu.Device(), WGPUBufferUsage_Uniform, sizeof(WaterUniform));
+    SyncExtent(coast, HeightField::kHalfExtent);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 地图重开时只换水面网格，沿用深度采样和渲染管线。
+//————————————————————————————————————————————————————————————————————————————————
+void WaterRenderer::SyncExtent(bool coast, float halfExtent) {
+    if (coast == mLastCoast && halfExtent == mLastExtent) return;
+    const auto mesh = MakeWaterMesh(coast, halfExtent);
     const auto bytes = mesh.size() * sizeof(glm::vec3);
     mVertexCount = static_cast<std::uint32_t>(mesh.size());
-    mVertices = MakeWaterBuffer(gpu.Device(), WGPUBufferUsage_Vertex, bytes);
-    wgpuQueueWriteBuffer(gpu.Queue(), mVertices.get(), 0, mesh.data(), bytes);
-    mUniform = MakeWaterBuffer(gpu.Device(), WGPUBufferUsage_Uniform, sizeof(WaterUniform));
+    mVertices = MakeWaterBuffer(mGpu.Device(), WGPUBufferUsage_Vertex, bytes);
+    wgpuQueueWriteBuffer(mGpu.Queue(), mVertices.get(), 0, mesh.data(), bytes);
+    mLastExtent = halfExtent;
+    mLastCoast = coast;
 }
 
 //————————————————————————————————————————————————————————————————————————————————

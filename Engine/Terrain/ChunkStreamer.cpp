@@ -14,15 +14,16 @@ namespace {
 // 第九章已把路面裁进半米格。用三角形重心可以无缝分派到块键。
 //————————————————————————————————————————————————————————————————————————————————
 auto SplitRoad(const HeightField& field, const std::optional<RoadSpline>& road) {
-    std::array<std::vector<SceneVertex>, HeightField::kChunkCount> chunks;
+    std::array<std::vector<SceneVertex>, TerrainGrid::kMaxChunkCount> chunks;
     if (!road) return chunks;
     const auto mesh = MakeRoadMesh(field, *road);
+    const auto grid = field.Grid();
     for (std::size_t i = 0; i < mesh.size(); i += 3) {
         glm::vec2 center{0.0f};
         for (std::size_t j = i; j < i + 3; ++j) {
             center += glm::vec2{mesh[j].position[0], mesh[j].position[2]};
         }
-        auto& chunk = chunks[TerrainIndex(HeightField::ChunkAt(center / 3.0f))];
+        auto& chunk = chunks[grid.Index(grid.KeyAt(center / 3.0f))];
         chunk.insert(chunk.end(), mesh.begin() + i, mesh.begin() + i + 3);
     }
     return chunks;
@@ -46,11 +47,13 @@ void ChunkStreamer::Update(glm::ivec2 focus, const HeightField& heights, const s
                          mSource->plants.seed != plants.seed || mSource->plants.density != plants.density ||
                          mSource->plants.minPlantHeight != plants.minPlantHeight;
     if (!changed && focus == mFocus) return;
+    const auto grid = heights.Grid();
+    if (!mSource || mSource->heights.Grid() != grid) mSlots = {};
     if (changed) mSource = std::make_shared<const Source>(Source{heights, road, plants});
     mFocus = focus;
     mPriority.clear();
-    for (std::size_t index = 0; index < mSlots.size(); ++index) {
-        const auto delta = TerrainKey(index) - focus;
+    for (std::size_t index = 0; index < grid.ChunkCount(); ++index) {
+        const auto delta = grid.Key(index) - focus;
         auto& slot = mSlots[index];
         if (std::max(std::abs(delta.x), std::abs(delta.y)) > kRadius) {
             slot = {};
@@ -59,9 +62,9 @@ void ChunkStreamer::Update(glm::ivec2 focus, const HeightField& heights, const s
         if (changed || slot.state == State::Empty) slot = {State::Queued, std::nullopt};
         mPriority.push_back(index);
     }
-    std::stable_sort(mPriority.begin(), mPriority.end(), [focus](std::size_t a, std::size_t b) {
-        const auto distance = [focus](std::size_t index) {
-            const auto d = TerrainKey(index) - focus;
+    std::stable_sort(mPriority.begin(), mPriority.end(), [focus, grid](std::size_t a, std::size_t b) {
+        const auto distance = [focus, grid](std::size_t index) {
+            const auto d = grid.Key(index) - focus;
             return d.x * d.x + d.y * d.y;
         };
         return distance(a) < distance(b);
@@ -85,7 +88,7 @@ std::optional<std::size_t> ChunkStreamer::FirstWithState(State state) const {
 void ChunkStreamer::Run(std::stop_token stop) {
     std::shared_ptr<const Source> lastSource;
     RoadMask mask;
-    std::array<std::vector<SceneVertex>, HeightField::kChunkCount> roadChunks;
+    std::array<std::vector<SceneVertex>, TerrainGrid::kMaxChunkCount> roadChunks;
     try {
         while (!stop.stop_requested()) {
             std::shared_ptr<const Source> source;
@@ -99,12 +102,12 @@ void ChunkStreamer::Run(std::stop_token stop) {
                 source = mSource;
             }
             if (source != lastSource) {
-                mask = source->road ? MakeRoadMask(*source->road) : RoadMask{};
+                mask = source->road ? MakeRoadMask(*source->road, source->heights.Grid()) : RoadMask(source->heights.Grid());
                 roadChunks = SplitRoad(source->heights, source->road);
                 lastSource = source;
             }
-            const auto key = TerrainKey(index);
             const auto& heights = source->heights;
+            const auto key = heights.Grid().Key(index);
             const bool paintTrail = !source->road;
             ChunkPayload result{index, MeasureTerrainBounds(heights, key),
                                 MakeTerrainChunk(heights, key, paintTrail),

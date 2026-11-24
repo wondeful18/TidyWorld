@@ -99,8 +99,9 @@ void ClipToTerrain(std::vector<SceneVertex>& mesh, const HeightField& field,
     const auto offsetSlope = -Xz(normal) / normal.y;
     const auto first = glm::ivec2(glm::floor(glm::min(Xz(a), glm::min(Xz(b), Xz(c))) / HeightField::kSpacing));
     const auto last = glm::ivec2(glm::floor(glm::max(Xz(a), glm::max(Xz(b), Xz(c))) / HeightField::kSpacing));
-    for (int z = std::max(first.y, HeightField::kFirstSample); z <= std::min(last.y, HeightField::kLastSample - 1); ++z) {
-        for (int x = std::max(first.x, HeightField::kFirstSample); x <= std::min(last.x, HeightField::kLastSample - 1); ++x) {
+    const auto grid = field.Grid();
+    for (int z = std::max(first.y, grid.FirstSample()); z <= std::min(last.y, grid.LastSample() - 1); ++z) {
+        for (int x = std::max(first.x, grid.FirstSample()); x <= std::min(last.x, grid.LastSample() - 1); ++x) {
             const float left = x * HeightField::kSpacing;
             const float bottom = z * HeightField::kSpacing;
             const float diagonal = left + bottom + HeightField::kSpacing;
@@ -188,7 +189,7 @@ void AppendStrip(std::vector<SceneVertex>& mesh, const HeightField& field,
 //————————————————————————————————————————————————————————————————————————————————
 // 支路沿主路局部切线的垂线延伸。T 字只取一边，十字取两边。
 //————————————————————————————————————————————————————————————————————————————————
-std::vector<glm::vec3> RoadSpline::Branch() const {
+std::vector<glm::vec3> RoadSpline::Branch(float pointLimit) const {
     if (junction == RoadJunction::None || points.size() < 3) {
         return {};
     }
@@ -198,7 +199,7 @@ std::vector<glm::vec3> RoadSpline::Branch() const {
     const auto normal = glm::dot(axis, axis) > 1.0e-6f ? glm::normalize(glm::vec2{-axis.y, axis.x})
                                                      : glm::vec2{1, 0};
     const auto endpoint = [&](float sign) {
-        const auto xz = glm::clamp(Xz(center) + sign * branchLength * normal, -kPointLimit, kPointLimit);
+        const auto xz = glm::clamp(Xz(center) + sign * branchLength * normal, -pointLimit, pointLimit);
         return glm::vec3{xz.x, center.y, xz.y};
     };
     if (junction == RoadJunction::Cross) {
@@ -213,7 +214,7 @@ std::vector<glm::vec3> RoadSpline::Branch() const {
 std::vector<SceneVertex> MakeRoadMesh(const HeightField& field, const RoadSpline& road) {
     std::vector<SceneVertex> mesh;
     AppendStrip(mesh, field, road.Centerline(), road.width);
-    const auto branch = road.Branch();
+    const auto branch = road.Branch(field.Grid().HalfExtent() - 0.5f);
     if (!branch.empty()) {
         AppendStrip(mesh, field, branch, road.width);
         const auto center = branch[road.junction == RoadJunction::Cross ? 1 : 0];
@@ -232,24 +233,26 @@ std::vector<SceneVertex> MakeRoadMesh(const HeightField& field, const RoadSpline
 //————————————————————————————————————————————————————————————————————————————————
 // 道路和输出遮罩使用同一条中心线，留边也包含道路开头与结尾。
 //————————————————————————————————————————————————————————————————————————————————
-RoadMask MakeRoadMask(const RoadSpline& road) {
-    RoadMask mask;
-    constexpr float spacing = 2.0f * HeightField::kHalfExtent / RoadMask::kSide;
+RoadMask MakeRoadMask(const RoadSpline& road, TerrainGrid grid) {
+    RoadMask mask(grid);
+    const float extent = grid.HalfExtent();
+    constexpr float spacing = RoadMask::kSpacing;
+    const int side = mask.Side();
     const float radius = road.width * 0.5f + road.margin;
-    for (const auto& path : {road.Centerline(), road.Branch()}) for (std::size_t i = 1; i < path.size(); ++i) {
+    for (const auto& path : {road.Centerline(), road.Branch(extent - 0.5f)}) for (std::size_t i = 1; i < path.size(); ++i) {
         const auto a = Xz(path[i - 1]);
         const auto b = Xz(path[i]);
         const auto delta = b - a;
         if (glm::dot(delta, delta) < 1.0e-8f) continue;
-        const auto low = (glm::min(a, b) - radius + HeightField::kHalfExtent) / spacing;
-        const auto high = (glm::max(a, b) + radius + HeightField::kHalfExtent) / spacing;
+        const auto low = (glm::min(a, b) - radius + extent) / spacing;
+        const auto high = (glm::max(a, b) + radius + extent) / spacing;
         for (int z = std::max(0, static_cast<int>(std::floor(low.y)));
-             z <= std::min(RoadMask::kSide - 1, static_cast<int>(std::floor(high.y))); ++z) {
+             z <= std::min(side - 1, static_cast<int>(std::floor(high.y))); ++z) {
             for (int x = std::max(0, static_cast<int>(std::floor(low.x)));
-                 x <= std::min(RoadMask::kSide - 1, static_cast<int>(std::floor(high.x))); ++x) {
-                const auto p = (glm::vec2{x, z} + 0.5f) * spacing - HeightField::kHalfExtent;
+                 x <= std::min(side - 1, static_cast<int>(std::floor(high.x))); ++x) {
+                const auto p = (glm::vec2{x, z} + 0.5f) * spacing - extent;
                 if (DistanceSquared(p, a, b) <= radius * radius) {
-                    mask.pixels[z * RoadMask::kSide + x] = 255;
+                    mask.pixels[z * side + x] = 255;
                 }
             }
         }
@@ -261,14 +264,15 @@ RoadMask MakeRoadMask(const RoadSpline& road) {
 // 用与 PGM 导出相同的坐标查找与圆形占地相交的遮罩像素。
 //————————————————————————————————————————————————————————————————————————————————
 bool RoadMask::Blocks(glm::vec2 xz, float radius) const {
-    constexpr float extent = HeightField::kHalfExtent;
-    constexpr float spacing = 2.0f * extent / kSide;
+    const float extent = grid.HalfExtent();
+    constexpr float spacing = kSpacing;
+    const int side = Side();
     const auto low = glm::ivec2(glm::floor((xz + extent - radius) / spacing));
     const auto high = glm::ivec2(glm::floor((xz + extent + radius) / spacing));
-    if (low.x < 0 || low.y < 0 || high.x >= kSide || high.y >= kSide) return true;
+    if (low.x < 0 || low.y < 0 || high.x >= side || high.y >= side) return true;
     for (int z = low.y; z <= high.y; ++z) {
         for (int x = low.x; x <= high.x; ++x) {
-            if (pixels[z * kSide + x] == 0) continue;
+            if (pixels[z * side + x] == 0) continue;
             const auto corner = glm::vec2{x, z} * spacing - extent;
             const auto offset = xz - glm::clamp(xz, corner, corner + spacing);
             if (glm::dot(offset, offset) <= radius * radius) return true;

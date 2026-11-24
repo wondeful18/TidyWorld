@@ -29,6 +29,7 @@ constexpr int kEcologyVersion = 5;
 constexpr int kVillageVersion = 6;
 constexpr int kLightmapVersion = 7;
 constexpr int kDayCycleVersion = 8;
+constexpr int kCapstoneVersion = 9;
 constexpr int kLegacyHeightSide = 65;
 constexpr int kLegacyPaintSide = 128;
 constexpr float kCoordinateLimit = 1000000.0f;
@@ -84,15 +85,16 @@ Transform ReadTransform(const Json& entry) {
 //————————————————————————————————————————————————————————————————————————————————
 void ReadHeightField(const Json& data, HeightField& field) {
     const auto& side = data.at("samples_per_axis");
-    if (data.at("spacing_m") != HeightField::kSpacing ||
-        (side != HeightField::kSampleCount && side != kLegacyHeightSide)) {
+    const auto grid = field.Grid();
+    const bool legacy = grid == TerrainGrid{} && side == kLegacyHeightSide;
+    if (data.at("spacing_m") != HeightField::kSpacing || (side != grid.SampleSide() && !legacy)) {
         throw std::runtime_error("Unsupported heightfield dimensions.");
     }
     const int savedSide = side.get<int>();
     const auto& entries = data.at("heights_m");
     RequireArray(entries, static_cast<std::size_t>(savedSide * savedSide));
     auto samples = field.Values();
-    if (savedSide == HeightField::kSampleCount) {
+    if (!legacy) {
         for (std::size_t i = 0; i < samples.size(); ++i) {
             samples[i] = ReadNumber(entries[i], -HeightField::kHeightLimit, HeightField::kHeightLimit);
         }
@@ -140,9 +142,13 @@ Json Encode(const WorldScene& scene) {
     const auto& shadow = scene.shadows.value();
     const auto& sky = scene.environment.value();
     const bool ecology = scene.vegetation && scene.vegetation->mode == VegetationMode::TerrainRules;
+    const bool large = scene.terrain && scene.terrain->Grid() == TerrainGrid(true);
+    const int version = large ? kCapstoneVersion : scene.dayCycle ? kDayCycleVersion
+        : scene.lightmapEnabled ? kLightmapVersion : scene.canUseGltfProps ? kVillageVersion
+        : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
+        : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion;
     Json doc = {
-        {"version", scene.dayCycle ? kDayCycleVersion : scene.lightmapEnabled ? kLightmapVersion : scene.canUseGltfProps ? kVillageVersion : ecology ? kEcologyVersion : scene.canPlaceProps ? kPropVersion
-                                        : scene.road ? kRoadVersion : scene.terrain ? kTerrainVersion : kSceneVersion},
+        {"version", version},
         {"objects", objects},
         {"spawn", {{scene.terrain ? "world_xz" : "ground_xz", Json::array({spawn.groundXZ.x, spawn.groundXZ.y})},
                    {"yaw_deg", spawn.yaw}}},
@@ -157,7 +163,7 @@ Json Encode(const WorldScene& scene) {
     if (scene.dayCycle) doc["time_hours"] = WrapDayHour(scene.dayCycle->hour);
     if (scene.terrain) {
         doc["heightfield"] = {{"spacing_m", HeightField::kSpacing},
-                              {"samples_per_axis", HeightField::kSampleCount},
+                              {"samples_per_axis", scene.terrain->Grid().SampleSide()},
                               {"heights_m", scene.terrain->Values()}};
     }
     if (scene.road) {
@@ -235,20 +241,17 @@ void ReadObjects(const Json& entries, WorldScene& scene) {
 //————————————————————————————————————————————————————————————————————————————————
 WorldScene Decode(const Json& doc) {
     const auto& version = doc.at("version");
-    if (!version.is_number_integer() || (version != kSceneVersion && version != kTerrainVersion &&
-                                         version != kRoadVersion && version != kPropVersion &&
-                                         version != kEcologyVersion && version != kVillageVersion &&
-                                         version != kLightmapVersion && version != kDayCycleVersion)) {
+    if (!version.is_number_integer() || version < kSceneVersion || version > kCapstoneVersion) {
         throw std::runtime_error("Unsupported scene file version.");
     }
     WorldScene scene;
     const bool terrain = version != kSceneVersion;
     if (version.get<int>() >= kLightmapVersion) scene.lightmapEnabled = true;
-    if (version == kDayCycleVersion) {
+    if (version.get<int>() >= kDayCycleVersion) {
         scene.dayCycle.emplace().hour = WrapDayHour(ReadNumber(doc.at("time_hours"), 0.0f, 24.0f));
     }
     if (terrain) {
-        ReadHeightField(doc.at("heightfield"), scene.terrain.emplace());
+        ReadHeightField(doc.at("heightfield"), scene.terrain.emplace(TerrainGrid{version == kCapstoneVersion}));
         scene.canSculpt = true;
     }
     if (version.get<int>() >= kRoadVersion) {
@@ -261,14 +264,15 @@ WorldScene Decode(const Json& doc) {
         road.points.clear();
         const auto offsets = data.find("control_y_offset_m");
         if (offsets != data.end()) RequireArray(*offsets, points.size());
+        const float pointLimit = scene.terrain->Grid().HalfExtent() - 0.5f;
         for (std::size_t i = 0; i < points.size(); ++i) {
             const auto& item = points[i];
             RequireArray(item, 2);
             const float y = offsets == data.end() ? 0.0f
                 : ReadNumber((*offsets)[i], -RoadSpline::kHeightOffsetLimit, RoadSpline::kHeightOffsetLimit);
-            road.points.emplace_back(ReadNumber(item[0], -RoadSpline::kPointLimit, RoadSpline::kPointLimit),
+            road.points.emplace_back(ReadNumber(item[0], -pointLimit, pointLimit),
                                      y,
-                                     ReadNumber(item[1], -RoadSpline::kPointLimit, RoadSpline::kPointLimit));
+                                     ReadNumber(item[1], -pointLimit, pointLimit));
         }
         road.width = ReadNumber(data.at("width_m"), RoadSpline::kMinimumWidth, RoadSpline::kMaximumWidth);
         road.margin = ReadNumber(data.at("margin_m"), 0.0f, RoadSpline::kMaximumMargin);
@@ -361,8 +365,8 @@ WorldScene Decode(const Json& doc) {
     const auto& spawn = doc.at("spawn");
     const auto& xz = spawn.at(terrain ? "world_xz" : "ground_xz");
     RequireArray(xz, 2);
-    const float limitX = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitX;
-    const float limitZ = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitZ;
+    const float limitX = terrain ? scene.terrain->Grid().WalkLimit() : WalkSpawn::kLimitX;
+    const float limitZ = terrain ? scene.terrain->Grid().WalkLimit() : WalkSpawn::kLimitZ;
     scene.spawn = WalkSpawn{{ReadNumber(xz[0], -limitX, limitX), ReadNumber(xz[1], -limitZ, limitZ)},
                            ReadNumber(spawn.at("yaw_deg"), -180.0f, 180.0f)};
 
@@ -485,6 +489,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     }
     loaded.showChunkBorders = scene.showChunkBorders;
     loaded.terrainPreview = scene.terrainPreview;
+    if (loaded.terrain && loaded.terrain->Grid() == TerrainGrid(true) && !scene.capstone) {
+        throw std::runtime_error("The expanded terrain opens in Chapter 21.");
+    }
+    loaded.capstone = scene.capstone;
     loaded.streamTerrain = scene.streamTerrain;
     loaded.materials = scene.materials;
     loaded.water = scene.water;
@@ -504,11 +512,11 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
 //————————————————————————————————————————————————————————————————————————————————
 // 文件第一个像素对应样区的最小 X、Z，依次写完一行再增大 Z。
 //————————————————————————————————————————————————————————————————————————————————
-void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road) {
-    const auto mask = MakeRoadMask(road);
-    const auto side = std::to_string(RoadMask::kSide);
-    const auto min = std::to_string(-HeightField::kHalfExtent);
-    const auto spacing = std::to_string(2.0f * HeightField::kHalfExtent / RoadMask::kSide);
+void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road, TerrainGrid grid) {
+    const auto mask = MakeRoadMask(road, grid);
+    const auto side = std::to_string(mask.Side());
+    const auto min = std::to_string(-grid.HalfExtent());
+    const auto spacing = std::to_string(RoadMask::kSpacing);
     std::string data = "P5\n# TinyWorld world_xz_min=" + min + "," + min +
         " pixel_spacing_m=" + spacing + "\n" + side + " " + side + "\n255\n";
     data.append(reinterpret_cast<const char*>(mask.pixels.data()), mask.pixels.size());

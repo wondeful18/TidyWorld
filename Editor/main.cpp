@@ -1,4 +1,7 @@
 #include "Editor/Application.h"
+#include "Engine/Scene/Capstone.h"
+
+#include <algorithm>
 
 #include <charconv>
 #include <cstdlib>
@@ -30,6 +33,19 @@ int main(int argc, char** argv) {
             options.direct = true;
         } else if (argument == "--smoke-test") {
             options.smokeTest = true;
+        } else if (argument == "--benchmark-capstone") {
+            options.benchmarkCapstone = true;
+        } else if (argument == "--verify-tour" && index + 1 < argc) {
+            options.tourVerificationPath = argv[++index];
+        } else if (argument == "--tour-stop" && index + 1 < argc) {
+            const std::string_view stop = argv[++index];
+            const auto& stops = tinyworld::kTourStops;
+            const auto match = std::find_if(stops.begin(), stops.end(), [&](const auto& s) { return stop == s.id; });
+            if (match == stops.end()) {
+                std::cerr << "Choose tour stop forest, village, bridge, estuary or cape.\n";
+                return EXIT_FAILURE;
+            }
+            options.tourStop = static_cast<std::size_t>(match - stops.begin());
         } else if (argument == "--benchmark-streaming") {
             options.benchmarkStreaming = true;
         } else if (argument == "--benchmark-terrain") {
@@ -90,8 +106,10 @@ int main(int argc, char** argv) {
                 options.chapter = tinyworld::Chapter::TerrainVisibility;
             } else if (value == "20") {
                 options.chapter = tinyworld::Chapter::TerrainStreaming;
+            } else if (value == "21") {
+                options.chapter = tinyworld::Chapter::Capstone;
             } else {
-                std::cerr << "Choose chapter 01 through 20.\n";
+                std::cerr << "Choose chapter 01 through 21.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--preset" && index + 1 < argc) {
@@ -216,7 +234,7 @@ int main(int argc, char** argv) {
             }
             options.shadowDistance = metres;
         } else if (argument == "--help") {
-            std::cout << "TinyWorld [--chapter 01..20] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
+            std::cout << "TinyWorld [--chapter 01..21] [--preset overlap|evening|drive|walk|materials|shore|porch] [--direct]\n"
                          "          [--smoke-test | --capture output.ppm]\n"
                          "Chapter 03+: [--no-shadows] [--hard-shadows] [--shadow-bias 0..0.01]\n"
                          "Chapter 04+: [--sky cubemap|panorama] [--no-reflections]\n"
@@ -234,7 +252,9 @@ int main(int argc, char** argv) {
                          "Chapter 18+: [--time hours]\n"
                          "Chapter 19+: [--terrain-lod on|off] [--terrain-cull on|off] [--terrain-view 0..3]\n"
                          "Chapter 19: [--benchmark-terrain]\n"
-                         "Chapter 20: [--benchmark-streaming]\n";
+                         "Chapter 20: [--benchmark-streaming]\n"
+                         "Chapter 21: [--tour-stop forest|village|bridge|estuary|cape]\n"
+                         "            [--verify-tour ROUNDTRIP.json | --benchmark-capstone]\n";
             return EXIT_SUCCESS;
         } else {
             std::cerr << "Unknown option: " << argument << " (use --help)\n";
@@ -251,7 +271,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     if (options.benchmarkVegetation &&
-        (options.chapter < tinyworld::Chapter::Meadow || options.chapter == tinyworld::Chapter::TerrainStreaming || options.smokeTest || !options.capturePath.empty() ||
+        (options.chapter < tinyworld::Chapter::Meadow || options.chapter >= tinyworld::Chapter::TerrainStreaming || options.smokeTest || !options.capturePath.empty() ||
          !options.roadMaskPath.empty() || options.worldPreset == tinyworld::WorldPreset::Materials)) {
         std::cerr << "Run the vegetation benchmark separately with chapter 11 or 12 and a terrain view.\n";
         return EXIT_FAILURE;
@@ -271,6 +291,23 @@ int main(int argc, char** argv) {
     if ((options.terrainLod || options.terrainCull || options.terrainView) &&
         options.chapter < tinyworld::Chapter::TerrainVisibility) {
         std::cerr << "Terrain visibility options require chapter 19 or later.\n";
+        return EXIT_FAILURE;
+    }
+    const bool verifyTour = !options.tourVerificationPath.empty();
+    if ((verifyTour || options.benchmarkCapstone || options.tourStop) && options.chapter != tinyworld::Chapter::Capstone) {
+        std::cerr << "Tour options require chapter 21.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.tourStop && (options.terrainView || options.worldPreset != tinyworld::WorldPreset::Default)) {
+        std::cerr << "Choose one viewpoint or preset.\n";
+        return EXIT_FAILURE;
+    }
+    if ((verifyTour || options.benchmarkCapstone) &&
+        ((verifyTour && options.benchmarkCapstone) || options.benchmarkTerrain || options.benchmarkStreaming ||
+         options.benchmarkVegetation || options.smokeTest || !options.capturePath.empty() ||
+         !options.roadMaskPath.empty() || options.worldPreset != tinyworld::WorldPreset::Default ||
+         options.tourStop || options.terrainView || (options.benchmarkCapstone && !options.scenePath.empty()))) {
+        std::cerr << "Run tour verification or the capstone benchmark as a separate command.\n";
         return EXIT_FAILURE;
     }
     if (options.benchmarkStreaming &&

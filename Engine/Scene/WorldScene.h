@@ -110,6 +110,7 @@ struct WorldScene {
     std::optional<WalkSpawn> spawn;  // 第五章的步行入口，支持持久化
     std::optional<HeightField> terrain;  // 第六章的全局高度样点
     bool showChunkBorders{};  // 是否在颜色通道叠画地形的内部边界
+    bool capstone{};                     // 第 21 章允许加载较大的场景布局
     bool streamTerrain{};                 // 第二十章分块准备地形和植被实例
     std::optional<TerrainPreview> terrainPreview; // 第十九章的独立 LOD 和视锥开关
     bool canPreviewLod{};  // 第六章可以切换远处块的教学 LOD

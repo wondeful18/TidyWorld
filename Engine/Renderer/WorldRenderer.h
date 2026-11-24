@@ -37,6 +37,7 @@ public:
     [[nodiscard]] MaterialPreviews PaintPreviews() const {
         return mMaterials ? mMaterials->PreviewViews() : MaterialPreviews{};
     }
+    [[nodiscard]] const unsigned& SceneDraws() const { return mSceneDraws; }
     [[nodiscard]] const TerrainStreamStats& StreamStatistics() const { return mStreamStats; }
     [[nodiscard]] bool StreamingSettled() const;
     void WaitForChunkData();
@@ -85,7 +86,7 @@ private:
     // 阴影通道提交全部物体。颜色通道把内置和 glTF 物体分批调用。
     //————————————————————————————————————————————————————————————————————————————————
     enum class PropPass { BuiltinColor, GltfColor, Shadows };
-    void DrawProps(WGPURenderPassEncoder pass, const std::vector<PlacedProp>& props, PropPass type) const;
+    void DrawProps(WGPURenderPassEncoder pass, const std::vector<PlacedProp>& props, PropPass type);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 高度变化后刷新受影响的固定大小顶点缓冲。
@@ -108,7 +109,7 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     // 绑定一个网格的顶点与 uniform，提交一次非索引绘制。
     //————————————————————————————————————————————————————————————————————————————————
-    static void DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh, WGPUBindGroup instance = nullptr);
+    void DrawMesh(WGPURenderPassEncoder pass, const Drawable& mesh, WGPUBindGroup instance = nullptr);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 原型的一个三角形批次，带与其他实例共享的材质绑定。
@@ -147,17 +148,19 @@ private:
     std::array<GltfPrototype, kPropAssets.size() - kBuiltinPropCount> mGltfProps;  // 课程 glTF 资产原型
     std::vector<Drawable> mTerrainDraws;                    // 每个整数块键对应一次绘制
     std::vector<Drawable> mCoarseTerrainDraws;              // 第六章同一批块的 LOD1 网格
-    std::array<TerrainBounds, HeightField::kChunkCount> mTerrainBounds{}; // 两档网格共用的包围盒
-    std::array<bool, HeightField::kChunkCount> mTerrainVisible{}; // 仅限制相机通道
+    std::array<TerrainBounds, TerrainGrid::kMaxChunkCount> mTerrainBounds{}; // 两档网格共用的包围盒
+    std::array<bool, TerrainGrid::kMaxChunkCount> mTerrainVisible{}; // 仅限制相机通道
     TerrainDrawStats mTerrainStats;
+    unsigned mSceneDraws{};                       // 场景三通道的实际绘制调用
+    TerrainGrid mTerrainGrid;                     // 驻留索引所属的布局
     TerrainStreamStats mStreamStats;
-    std::array<std::size_t, HeightField::kChunkCount> mChunkBytes{}; // 地形顶点和植被实例的提交字节
+    std::array<std::size_t, TerrainGrid::kMaxChunkCount> mChunkBytes{}; // 地形顶点和植被实例的提交字节
     std::optional<ChunkStreamer> mStream;
-    std::array<Drawable, HeightField::kChunkCount> mStreamRoadDraws;
-    std::array<bool, HeightField::kChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级
+    std::array<Drawable, TerrainGrid::kMaxChunkCount> mStreamRoadDraws;
+    std::array<bool, TerrainGrid::kMaxChunkCount> mCoarseChoice{};  // 本帧两个通道共用的等级
     std::array<Drawable, 4> mMaterialSpheres;                // 成对比较粗糙度与金属度的球
     std::optional<Drawable> mChunkBorders;                  // 仅供颜色通道绘制的边界提示
-    std::array<std::uint64_t, HeightField::kChunkCount> mChunkRevisions{};  // 缓存的每块高度修订号
+    std::array<std::uint64_t, TerrainGrid::kMaxChunkCount> mChunkRevisions{};  // 缓存的每块高度修订号
     std::uint64_t mBorderRevision{};                        // 贴地边界使用的高度修订号
     std::optional<Drawable> mRoadMesh;                      // 路面三角形及绘制资源
     std::optional<RoadSpline> mLastRoad;                     // 最近一次生成几何时的控制点和宽度

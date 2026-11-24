@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace tinyworld {
 
@@ -22,14 +23,46 @@ struct TerrainBrush {
 };
 
 //————————————————————————————————————————————————————————————————————————————————
+// 固定采样间距下的正方形块布局。尺寸档位决定有效键、索引和世界边界。
+//————————————————————————————————————————————————————————————————————————————————
+class TerrainGrid {
+public:
+    static constexpr int kCells = 16;
+    static constexpr float kSpacing = 0.5f;
+    static constexpr float kChunkSize = kCells * kSpacing;
+    static constexpr int kSmallRadius = 3;
+    static constexpr int kLargeRadius = 5;
+    static constexpr std::size_t kMaxChunkCount = 4 * kLargeRadius * kLargeRadius;
+
+    explicit constexpr TerrainGrid(bool large = false) : mRadius(large ? kLargeRadius : kSmallRadius) {}
+    constexpr bool operator==(const TerrainGrid&) const = default;
+    [[nodiscard]] constexpr int FirstKey() const { return -mRadius; }
+    [[nodiscard]] constexpr int EndKey() const { return mRadius; }
+    [[nodiscard]] constexpr int Side() const { return 2 * mRadius; }
+    [[nodiscard]] constexpr int FirstSample() const { return FirstKey() * kCells; }
+    [[nodiscard]] constexpr int LastSample() const { return EndKey() * kCells; }
+    [[nodiscard]] constexpr int SampleSide() const { return LastSample() - FirstSample() + 1; }
+    [[nodiscard]] constexpr float HalfExtent() const { return mRadius * kChunkSize; }
+    [[nodiscard]] constexpr float WalkLimit() const { return HalfExtent() - 0.35f; }
+    [[nodiscard]] constexpr std::size_t ChunkCount() const { return Side() * Side(); }
+    [[nodiscard]] std::size_t SampleIndex(int x, int z) const;
+    [[nodiscard]] glm::ivec2 KeyAt(glm::vec2 xz) const;
+    [[nodiscard]] glm::ivec2 Key(std::size_t index) const;
+    [[nodiscard]] std::size_t Index(glm::ivec2 key) const;
+
+private:
+    int mRadius;
+};
+
+//————————————————————————————————————————————————————————————————————————————————
 // 一份覆盖世界原点两侧的规则采样网格。所有块读取同一份高度数组。
 //————————————————————————————————————————————————————————————————————————————————
 class HeightField {
 public:
-    static constexpr float kSpacing = 0.5f;  // 两个整数样点之间的米数
-    static constexpr int kCellsPerChunk = 16;  // 每个块每轴的单元格数
-    static constexpr int kFirstChunk = -3;  // X、Z 方向最小块键
-    static constexpr int kEndChunk = 3;  // X、Z 方向块键的上界，开区间
+    static constexpr float kSpacing = TerrainGrid::kSpacing;  // 两个整数样点之间的米数
+    static constexpr int kCellsPerChunk = TerrainGrid::kCells;  // 每个块每轴的单元格数
+    static constexpr int kFirstChunk = -TerrainGrid::kSmallRadius;  // X、Z 方向最小块键
+    static constexpr int kEndChunk = TerrainGrid::kSmallRadius;  // X、Z 方向块键的上界，开区间
     static constexpr float kChunkSize = kCellsPerChunk * kSpacing;  // 块边长，单位为米
     static constexpr int kFirstSample = kFirstChunk * kCellsPerChunk;  // 首个全局样点，包含
     static constexpr int kLastSample = kEndChunk * kCellsPerChunk;  // 末端共边样点，包含
@@ -38,12 +71,13 @@ public:
     static constexpr int kSampleCount = kLastSample - kFirstSample + 1;  // 含左右端点的每轴样点数
     static constexpr std::size_t kChunkCount = (kEndChunk - kFirstChunk) * (kEndChunk - kFirstChunk);  // 样区块数
     static constexpr float kHeightLimit = 12.0f;  // 高度编辑和文件读取共用的绝对上限，单位为米
-    using Samples = std::array<float, static_cast<std::size_t>(kSampleCount * kSampleCount)>;
+    using Samples = std::vector<float>;
 
     //————————————————————————————————————————————————————————————————————————————————
     // 用第六章的缓坡与两侧丘陵填满全局采样网格。
     //————————————————————————————————————————————————————————————————————————————————
-    HeightField();
+    explicit HeightField(TerrainGrid grid = TerrainGrid{});
+    [[nodiscard]] TerrainGrid Grid() const { return mGrid; }
 
     //————————————————————————————————————————————————————————————————————————————————
     // 查整数样点。外边界之外取最近的边缘样点，供法线差分使用。
@@ -96,9 +130,10 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     void Invalidate(glm::ivec2 low, glm::ivec2 high);
 
-    Samples mHeights{};  // 按 Z 行存储高度，单位为米
+    TerrainGrid mGrid;  // 与样点表、修订号和块键映射共用的布局
+    Samples mHeights;  // 按 Z 行存储高度，单位为米
     std::uint64_t mRevision{};  // 当前高度数组的修订号
-    std::array<std::uint64_t, kChunkCount> mChunkRevisions{};  // 受编辑影响的块使用新修订号
+    std::vector<std::uint64_t> mChunkRevisions;  // 受编辑影响的块使用新修订号
 };
 
 //————————————————————————————————————————————————————————————————————————————————

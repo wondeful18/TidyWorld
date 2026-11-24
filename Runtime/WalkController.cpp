@@ -94,8 +94,8 @@ void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, Wal
     // 窗口恢复后最多补算 0.1 秒，避免把长时间暂停变成一次大跳跃。
     mRemaining += std::clamp(deltaSeconds, 0.0, 0.1);
     const auto groundBasis = terrain ? glm::mat3{1.0f} : glm::mat3(ground.Matrix());
-    const float limitX = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitX;
-    const float limitZ = terrain ? HeightField::kWalkLimit : WalkSpawn::kLimitZ;
+    const float limitX = terrain ? terrain->Grid().WalkLimit() : WalkSpawn::kLimitX;
+    const float limitZ = terrain ? terrain->Grid().WalkLimit() : WalkSpawn::kLimitZ;
     const float stepSeconds = static_cast<float>(kStep);
     const float turnDegrees = input.turn * kTurnSpeed * stepSeconds;
     // 允许纳秒量级的舍入误差，避免同一段时间因帧分组少推进一步。

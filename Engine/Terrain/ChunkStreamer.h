@@ -91,7 +91,7 @@ private:
 
     mutable std::mutex mMutex;
     std::condition_variable_any mChanged;
-    std::array<Slot, HeightField::kChunkCount> mSlots;
+    std::array<Slot, TerrainGrid::kMaxChunkCount> mSlots;
     std::vector<std::size_t> mPriority; // 想要的键，按离视点的块距离排序
     std::shared_ptr<const Source> mSource;
     std::exception_ptr mFailure;

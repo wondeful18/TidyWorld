@@ -26,12 +26,11 @@ std::uint64_t NextPaintRevision() {
 //————————————————————————————————————————————————————————————————————————————————
 // 只遍历笔刷包围盒，并用圆形或方形的距离函数求边缘衰减。
 //————————————————————————————————————————————————————————————————————————————————
-void MaterialSplat::Paint(glm::vec2 center, const MaterialBrush& brush, float seconds) {
+void MaterialSplat::Paint(glm::vec2 center, const MaterialBrush& brush, float seconds, float extent) {
     if (brush.radius <= 0.0f || brush.strength <= 0.0f || seconds <= 0.0f) {
         return;
     }
-    constexpr float extent = HeightField::kHalfExtent;
-    constexpr float spacing = 2.0f * extent / kSide;
+    const float spacing = 2.0f * extent / kSide;
     const auto cell = [](float value) { return std::clamp(static_cast<int>(std::floor(value)), 0, kSide - 1); };
     bool changed = false;
     for (int z = cell((center.y + extent - brush.radius) / spacing);

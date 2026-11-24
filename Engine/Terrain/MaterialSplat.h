@@ -32,7 +32,8 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     // 笔刷同时重分配四个通道，每个像素的总和保持不超过 255。
     //————————————————————————————————————————————————————————————————————————————————
-    void Paint(glm::vec2 center, const MaterialBrush& brush, float seconds);
+    void Paint(glm::vec2 center, const MaterialBrush& brush, float seconds,
+               float extent = HeightField::kHalfExtent);
 
     //————————————————————————————————————————————————————————————————————————————————
     // 用校验后的完整像素表替换当前权重。
