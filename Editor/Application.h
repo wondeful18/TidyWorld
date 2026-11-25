@@ -13,7 +13,7 @@ enum class Chapter { Triangle, World, SunShadows, Sky, Walk, Terrain, Sculpt, Ma
 // 命令行选择演示内容、输出路径和验证方式。
 //————————————————————————————————————————————————————————————————————————————————
 struct ApplicationOptions {
-    Chapter chapter{Chapter::Triangle};             // 默认维持第一章启动行为
+    Chapter chapter{Chapter::Walk};  // 本分支的默认演示
     bool direct{};                                  // 跳过 ImGui，直接画入输出目标
     bool smokeTest{};                               // 检查真实窗口的尺寸变化与恢复
     bool chunkBorders{};                            // 第六章启动时显示内部块边界
