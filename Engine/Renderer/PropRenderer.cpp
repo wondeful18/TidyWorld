@@ -43,7 +43,7 @@ PropRenderer::PropRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const W
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 按原型上传顶点与两张材质纹理，实例之间共享这些 GPU 资源。
+// 按原型上传顶点与材质纹理，实例之间共享这些 GPU 资源。
 //————————————————————————————————————————————————————————————————————————————————
 void PropRenderer::LoadGltfProps(const std::filesystem::path& root, bool withLightmaps) {
     for (std::size_t i = 0; i < mGltfProps.size(); ++i) {

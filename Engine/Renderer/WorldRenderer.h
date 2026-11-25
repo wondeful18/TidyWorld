@@ -5,6 +5,7 @@
 #include "Engine/Renderer/SkyRenderer.h"
 #include "Engine/Renderer/SunShadowMap.h"
 #include "Engine/Renderer/SurfaceMaterials.h"
+#include "Engine/Renderer/ToneMapping.h"
 #include "Engine/Renderer/VegetationRenderer.h"
 #include "Engine/Renderer/WaterRenderer.h"
 #include "Engine/Renderer/WgpuHandle.h"
@@ -66,6 +67,7 @@ private:
     std::optional<SunShadowMap> mShadowMap;                // 仅由支持阴影的章节创建
     std::optional<SkyRenderer> mSky;                       // 第四章背景与共享环境纹理
     std::optional<WaterRenderer> mWater;  // 读取当前相机深度的半透明水面
+    std::optional<ToneMapping> mToneMapping; // 第十八章在独立通道映射到显示亮度
     std::optional<SurfaceMaterials> mMaterials;            // 第八章底色与粗糙度数组
     std::optional<VegetationRenderer> mVegetation;
     Drawable mVegetationUniform;
@@ -73,6 +75,7 @@ private:
     VegetationDrawStats mVegetationStats;
     PipelineHandle mPipeline;                             // 方向光与深度测试管线
     Drawable mRobot;                         // 小机器人的躯干
+    std::optional<Drawable> mRobotLamp;        // 第十八章跟着右手摆动的发光灯具
     std::array<Drawable, kRobotLimbCount> mRobotLimbs; // 共享步态驱动的四肢
     std::optional<PropRenderer> mProps;       // 固定地标与摆件
     unsigned mSceneDraws{};                       // 场景三通道的实际绘制调用

@@ -1,9 +1,8 @@
 //————————————————————————————————————————————————————————————————————————————————
 // 金属度分配漫反射与镜面颜色，GGX 用粗糙度控制高光分布。
 //————————————————————————————————————————————————————————————————————————————————
-fn shadePbr(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32) -> vec3<f32> {
+fn shadePbrNormal(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32, n: vec3<f32>) -> vec3<f32> {
     let pi = 3.14159265;
-    let n = normalize(input.normal);
     let l = draw.towardSun.xyz;
     let v = normalize(draw.cameraAndReflection.xyz - input.worldPosition);
     let halfVector = l + v;
@@ -26,5 +25,10 @@ fn shadePbr(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32) -> vec
     let diffuse = (1.0 - fresnel) * (1.0 - metal) * base / pi;
     let direct = (diffuse + specular) * draw.sunRadiance.xyz * (3.1 * nL * sunVisibility(input));
     let ambient = vec3<f32>(0.37, 0.42, 0.43) * (base * (1.0 - metal) + f0 * 0.65) * draw.lighting.x;
-    return clamp(direct + ambient, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lamp = lampDiffuse(input.worldPosition, n) * base * (1.0 - metal) / pi;
+    return lightingRange(direct + ambient + lamp);
+}
+
+fn shadePbr(input: VertexOutput, base: vec3<f32>, metal: f32, rough: f32) -> vec3<f32> {
+    return shadePbrNormal(input, base, metal, rough, normalize(input.normal));
 }

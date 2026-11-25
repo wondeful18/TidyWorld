@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 #include <glm/vec2.hpp>
@@ -29,6 +30,8 @@ struct GltfMaterial {
     glm::vec3 baseFactor{1.0f};      // 线性的底色乘数
     float metallicFactor{1.0f};      // 金属度乘数
     float roughnessFactor{1.0f};     // 粗糙度乘数
+    std::optional<GltfImage> normal; // TEXCOORD_0 上的线性切线空间法线
+    float normalScale{1.0f};        // 仅缩放法线的切线平面分量
 };
 
 //————————————————————————————————————————————————————————————————————————————————

@@ -41,6 +41,17 @@ std::vector<SceneVertex> MakeRobotMesh() {
     return mesh;
 }
 
+std::vector<SceneVertex> MakeRobotLamp() {
+    primitive::Mesh mesh;
+    constexpr primitive::Color housing{0.063f, 0.044f, 0.028f};
+    constexpr primitive::Color glass{0.93f, 0.54f, 0.14f};
+    primitive::AddBox(mesh, {-0.027f, 0.035f, -0.22f}, {0.027f, 0.068f, 0.0f}, housing);
+    primitive::AddBox(mesh, {-0.049f, -0.043f, -0.049f}, {0.049f, 0.036f, 0.049f}, glass);
+    primitive::AddBox(mesh, {-0.059f, -0.06f, -0.059f}, {0.059f, -0.043f, 0.059f}, housing);
+    primitive::AddBox(mesh, {-0.059f, 0.036f, -0.059f}, {0.059f, 0.052f, 0.059f}, housing);
+    return mesh;
+}
+
 //————————————————————————————————————————————————————————————————————————————————
 // 手臂以肩部为原点，腿和脚以髋部为原点，网格可独立绕关节运动。
 //————————————————————————————————————————————————————————————————————————————————

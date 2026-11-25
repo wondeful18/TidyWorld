@@ -56,6 +56,8 @@ void CheckScene(const std::filesystem::path& root, const std::filesystem::path& 
     scene.vegetation.emplace().mode = VegetationMode::TerrainRules;
     scene.lightmapEnabled = true;
     scene.dayCycle = DayCycleSettings{21.25f, false};
+    scene.lightingLab = LightingLab{WalkerLamp::Spot, true, 1.0f};
+    scene.normalMaps = false;
 
     LoadScene(root / "scenes/ch17/porch.json", scene);
     Require(scene.dayCycle->hour == 21.25f, "A Chapter 17 scene should keep the receiving timeline time.");
@@ -66,6 +68,9 @@ void CheckScene(const std::filesystem::path& root, const std::filesystem::path& 
     LoadScene(path, scene);
     Require(scene.dayCycle->hour == 21.25f && !scene.dayCycle->playing && scene.lightmapEnabled == true,
             "Reopen must restore the saved hour, pause playback and retain the lightmap.");
+    Require(scene.lightingLab && scene.lightingLab->lamp == WalkerLamp::Spot &&
+                scene.lightingLab->toneMap && scene.lightingLab->exposureEv == 1.0f && !scene.normalMaps,
+            "Reopening a scene must keep the live comparison controls.");
     scene.dayCycle.reset();
     const auto originalCount = scene.props.size();
     bool rejected = false;

@@ -525,7 +525,9 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
         throw std::runtime_error("Day-cycle scenes open in Chapter 18 or later.");
     }
     if (!loaded.dayCycle) loaded.dayCycle = scene.dayCycle;
+    loaded.lightingLab = scene.lightingLab;
     loaded.canUseGltfProps = scene.canUseGltfProps;
+    loaded.normalMaps = scene.normalMaps;
     if (scene.road && !loaded.road && !packaged) {
         loaded.road.emplace();
     }

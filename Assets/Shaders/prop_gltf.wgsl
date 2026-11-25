@@ -7,10 +7,11 @@
 //————————————————————————————————————————————————————————————————————————————————
 struct GltfFactors {
     baseAndMetal: vec4<f32>,    // RGB 是底色，A 是金属度乘数
-    roughness: vec4<f32>,      // X 是粗糙度乘数，其余用于对齐
+    roughnessAndNormal: vec4<f32>, // 粗糙度乘数、法线强度、有无法线图、对齐
 }
 @group(3) @binding(7) var<uniform> gltfFactors: GltfFactors;
 @group(3) @binding(8) var bakedLightmap: texture_2d<f32>;
+@group(3) @binding(9) var gltfNormal: texture_2d<f32>;
 
 //————————————————————————————————————————————————————————————————————————————————
 // glTF 顶点沿用世界和太阳变换，并传递 glTF 的两套纹理坐标。
@@ -26,13 +27,38 @@ fn vsGltf(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>,
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 金属度读 B，粗糙度读 G，底色由 sRGB 纹理采样时自动转为线性。
+// 用相邻像素的世界位置和 UV 变化恢复表面切线。镜像 UV 要保留副切线的符号。
 //————————————————————————————————————————————————————————————————————————————————
+fn materialNormal(input: VertexOutput) -> vec3<f32> {
+    let n = normalize(input.normal);
+    let dx = dpdx(input.worldPosition);
+    let dy = dpdy(input.worldPosition);
+    let uvDx = dpdx(input.uv);
+    let uvDy = dpdy(input.uv);
+    let uvArea = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
+    let tangentRaw = (dx * uvDy.y - dy * uvDx.y) * sign(uvArea);
+    let bitangentRaw = (dy * uvDx.x - dx * uvDy.x) * sign(uvArea);
+    let tangentPlane = tangentRaw - n * dot(n, tangentRaw);
+    if draw.lighting.w < 0.5 || gltfFactors.roughnessAndNormal.z == 0.0 ||
+       uvArea == 0.0 || dot(tangentPlane, tangentPlane) <= 0.0 {
+        return n;
+    }
+    let t = normalize(tangentPlane);
+    let b = cross(n, t) * select(-1.0, 1.0, dot(cross(n, t), bitangentRaw) >= 0.0);
+    let encoded = textureSampleGrad(gltfNormal, gltfSampler, input.uv, uvDx, uvDy).rgb;
+    let decoded = encoded * 2.0 - 1.0;
+    let local = vec3<f32>(decoded.xy * gltfFactors.roughnessAndNormal.y, decoded.z);
+    let mapped = mat3x3<f32>(t, b, n) * local;
+    if dot(mapped, mapped) <= 0.0 { return n; }
+    return normalize(mapped);
+}
+
+// 金属度读 B，粗糙度读 G，底色由 sRGB 纹理采样时自动转为线性。
 fn shadeGltf(input: VertexOutput) -> vec3<f32> {
     let base = textureSample(gltfBase, gltfSampler, input.uv).rgb * gltfFactors.baseAndMetal.rgb;
     let metalRough = textureSample(gltfMetalRough, gltfSampler, input.uv);
     let metal = metalRough.b * gltfFactors.baseAndMetal.a;
-    let direct = shadePbr(input, base, metal, metalRough.g * gltfFactors.roughness.x);
+    let direct = shadePbrNormal(input, base, metal, metalRough.g * gltfFactors.roughnessAndNormal.x, materialNormal(input));
     if draw.surface.bakedIrradiance == 0.0 {
         return direct;
     }

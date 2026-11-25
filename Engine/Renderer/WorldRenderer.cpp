@@ -12,6 +12,7 @@
 #include "Engine/Scene/SceneMesh.h"
 
 #include <glm/matrix.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/vec4.hpp>
 
 #include <algorithm>
@@ -29,6 +30,10 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
                              const WorldScene& scene, const std::filesystem::path& root)
     : mGpu(gpu) {
     const auto shaders = root / "shaders";
+    if (scene.lightingLab) {
+        mToneMapping.emplace(gpu, format, shaders);
+        format = ToneMapping::kSceneFormat;
+    }
     const auto shader = LoadWgslModule(gpu, shaders / "world.wgsl",
         {"output_color.wgsl", "fog.wgsl", "shadow.wgsl", "pbr.wgsl"});
     mObjectLayout = BuildObjectLayout(gpu);
@@ -66,7 +71,7 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
     }
 
     mClearColor = {0.89, 0.925, 0.941, 1.0};
-    if (IsSrgbFormat(format)) {
+    if (mToneMapping || IsSrgbFormat(format)) {
         mClearColor.r = DisplayToLinear(mClearColor.r);
         mClearColor.g = DisplayToLinear(mClearColor.g);
         mClearColor.b = DisplayToLinear(mClearColor.b);
@@ -74,6 +79,9 @@ WorldRenderer::WorldRenderer(WebGpuContext& gpu, WGPUTextureFormat format,
 
     mProps.emplace(gpu, format, scene, root, layout, mShadowMap->SamplingLayout(), mSky->Environment().Layout());
     mRobot = UploadIndexedMesh(mGpu, WithReflectivity(MakeRobotMesh()), layout, "Walker");
+    if (scene.lightingLab) {
+        mRobotLamp = UploadIndexedMesh(mGpu, WithReflectivity(MakeRobotLamp()), layout, "Walker lamp");
+    }
     for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
         mRobotLimbs[i] = UploadIndexedMesh(mGpu, WithReflectivity(MakeRobotLimb(static_cast<RobotLimb>(i))), layout, "Robot limb");
     }
@@ -88,6 +96,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
                            const WorldScene& scene) {
     mSceneDraws = 0;
     mDepth.Resize(mGpu, size);
+    auto sceneTarget = mToneMapping ? mToneMapping->SceneTarget(size) : target;
 
     mTerrain->Sync(scene);
     if (mWater) mWater->SyncExtent(scene.water->coast, mTerrain->Grid().HalfExtent());
@@ -104,7 +113,8 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const RenderCoordinates coordinates(camera, projection, scene.precision);
     const auto eye = camera.Position();
     const auto light = scene.dayCycle ? EvaluateDaylight(scene.dayCycle->hour) : Daylight{scene.sun};
-    const glm::vec4 lighting{light.ambient, light.nightMix, 0.0f, 0.0f};
+    const bool toneMap = scene.lightingLab && scene.lightingLab->toneMap;
+    const glm::vec4 lighting{light.ambient, light.nightMix, toneMap ? 1.0f : 0.0f, scene.normalMaps ? 1.0f : 0.0f};
     const glm::vec4 horizon = hasCoast
         ? glm::vec4(mSky->Environment().HorizonColor(glm::normalize(camera.target - eye), light.nightMix), 1.0f)
         : glm::vec4{0.0f};
@@ -146,16 +156,27 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     const bool showRobot = scene.spawn && !showSpheres && (!scene.storage ||
         scene.terrain->TryHeight(scene.IsWalking() ? glm::vec2{scene.WalkerPose().position.x, scene.WalkerPose().position.z}
                                                    : scene.spawn->groundXZ).has_value());
-    const DrawUniformWriter uniforms{mGpu.Queue(), coordinates,
-        DrawUniform{.viewProjection = coordinates.ViewProjection(), .towardSun = direction,
-                    .sunRadiance = sun, .cameraAndReflection = cameraAndReflection,
-                    .coast = coast, .air = air, .lighting = lighting}};
+    DrawUniform frame{.viewProjection = coordinates.ViewProjection(), .towardSun = direction,
+                      .sunRadiance = sun, .cameraAndReflection = cameraAndReflection,
+                      .coast = coast, .air = air, .lighting = lighting};
+    const auto robot = showRobot ? scene.WalkerPose().Matrix() : glm::mat4{1.0f};
+    const auto gait = scene.WalkerGait();
+    const bool showLamp = showRobot && scene.lightingLab && scene.lightingLab->lamp != WalkerLamp::Off;
+    glm::mat4 lampModel{1.0f};
+    if (showLamp) {
+        const auto hand = robot * RobotLimbPose(RobotLimb::RightArm, gait);
+        lampModel = glm::translate(hand, glm::vec3{-0.055f, -0.18f, 0.26f});
+        const auto forward = glm::normalize(glm::vec3(robot * glm::vec4{0.0f, -0.52f, 1.0f, 0.0f}));
+        const bool spot = scene.lightingLab->lamp == WalkerLamp::Spot;
+        frame.lampPositionAndPower = {glm::vec3(lampModel[3]), 8.0f};
+        frame.lampForwardAndCone = {forward, spot ? 0.8191520f : -1.0f}; // cos(35°)
+    }
+    const DrawUniformWriter uniforms{mGpu.Queue(), coordinates, frame};
+    if (showLamp) uniforms.Set(*mRobotLamp, lampModel, shadowControls, SurfaceParameters{.emission = 3.0f});
     if (showRobot) {
-        const auto root = scene.WalkerPose().Matrix();
-        uniforms.Set(mRobot, root, shadowControls);
-        const auto gait = scene.WalkerGait();
+        uniforms.Set(mRobot, robot, shadowControls);
         for (std::size_t i = 0; i < mRobotLimbs.size(); ++i) {
-            uniforms.Set(mRobotLimbs[i], root * RobotLimbPose(static_cast<RobotLimb>(i), gait), shadowControls);
+            uniforms.Set(mRobotLimbs[i], robot * RobotLimbPose(static_cast<RobotLimb>(i), gait), shadowControls);
         }
     }
     if (!showSpheres) mProps->Prepare(scene, *mTerrain, uniforms, shadowControls);
@@ -194,7 +215,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     }
 
     const bool showWater = mWater && scene.water && scene.water->view != WaterView::Off && !showSpheres;
-    auto pass = BeginColorPass(encoder, target, mClearColor, "World color pass", mDepth.View(),
+    auto pass = BeginColorPass(encoder, sceneTarget, mClearColor, "World color pass", mDepth.View(),
                                showWater ? WGPUStoreOp_Store : WGPUStoreOp_Discard);
     wgpuRenderPassEncoderSetPipeline(pass.get(), mPipeline.get());
     wgpuRenderPassEncoderSetBindGroup(pass.get(), 1, mShadowMap->SamplingBinding(), 0, nullptr);
@@ -203,6 +224,7 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
         wgpuRenderPassEncoderSetBindGroup(pass.get(), 3, mMaterials->Binding(), 0, nullptr);
     }
     DrawObjects(pass.get(), showRobot, showSpheres, false);
+    if (showLamp) DrawMesh(pass.get(), *mRobotLamp);
     if (!showSpheres) mSceneDraws += mProps->Draw(pass.get(), PropRenderer::Pass::BuiltinColor);
     mSceneDraws += mTerrain->DrawOverlays(pass.get());
     if (!showSpheres) mSceneDraws += mProps->Draw(pass.get(), PropRenderer::Pass::GltfColor);
@@ -217,8 +239,12 @@ void WorldRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, P
     ++mSceneDraws;
     wgpuRenderPassEncoderEnd(pass.get());
     if (showWater) {
-        mWater->Encode(encoder, target, mDepth.View(), coordinates.ViewProjection(), glm::vec3(coordinates.Model(glm::mat4{1.0f})[3]),
+        mWater->Encode(encoder, sceneTarget, mDepth.View(), coordinates.ViewProjection(), glm::vec3(coordinates.Model(glm::mat4{1.0f})[3]),
                        eye, *scene.water, glm::vec3(horizon), air, lighting);
+        ++mSceneDraws;
+    }
+    if (mToneMapping) {
+        mToneMapping->Encode(encoder, target, toneMap, scene.lightingLab->exposureEv);
         ++mSceneDraws;
     }
 }

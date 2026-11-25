@@ -128,8 +128,10 @@ int main(int argc, char** argv) {
                 options.worldPreset = tinyworld::WorldPreset::Shore;
             } else if (value == "porch") {
                 options.worldPreset = tinyworld::WorldPreset::Porch;
+            } else if (value == "bridge") {
+                options.worldPreset = tinyworld::WorldPreset::Bridge;
             } else {
-                std::cerr << "Choose preset overlap, evening, drive, walk, materials, shore or porch.\n";
+                std::cerr << "Choose preset overlap, evening, drive, walk, materials, shore, porch or bridge.\n";
                 return EXIT_FAILURE;
             }
         } else if (argument == "--no-shadows" || argument == "--hard-shadows" || argument == "--shadow-bias") {
@@ -211,6 +213,38 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
             options.dayHour = hour;
+        } else if (argument == "--normal-map" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value != "on" && value != "off") {
+                std::cerr << "Choose normal-map on or off.\n";
+                return EXIT_FAILURE;
+            }
+            options.normalMaps = value == "on";
+        } else if (argument == "--walker-lamp" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value == "off") options.lightingLab.lamp = tinyworld::WalkerLamp::Off;
+            else if (value == "point") options.lightingLab.lamp = tinyworld::WalkerLamp::Point;
+            else if (value == "spot") options.lightingLab.lamp = tinyworld::WalkerLamp::Spot;
+            else {
+                std::cerr << "Choose walker-lamp off, point or spot.\n";
+                return EXIT_FAILURE;
+            }
+            options.lightingLabOptions = true;
+        } else if (argument == "--tone-map" && index + 1 < argc) {
+            const std::string_view value = argv[++index];
+            if (value != "on" && value != "off") {
+                std::cerr << "Choose tone-map on or off.\n";
+                return EXIT_FAILURE;
+            }
+            options.lightingLab.toneMap = value == "on";
+            options.lightingLabOptions = true;
+        } else if (argument == "--exposure" && index + 1 < argc) {
+            const auto limit = tinyworld::LightingLab::kMaxExposure;
+            if (!ParseFloatInRange(argv[++index], options.lightingLab.exposureEv, -limit, limit)) {
+                std::cerr << "Exposure must be in [-4, 4] EV.\n";
+                return EXIT_FAILURE;
+            }
+            options.lightingLabOptions = true;
         } else if (argument == "--lightmap" && index + 1 < argc) {
             const std::string_view value = argv[++index];
             if (value != "on" && value != "off") {
@@ -245,11 +279,14 @@ int main(int argc, char** argv) {
                          "Chapter 08+: [--preset materials]\n"
                          "Chapter 09+: [--export-road-mask output.pgm]\n"
                          "Chapter 11+: [--benchmark-vegetation]\n"
+                         "Chapter 13+: [--normal-map on|off]\n"
+                         "Chapter 13: [--preset bridge]\n"
                          "Chapter 14+: [--water lit|depth|no-reflection|off] [--water-time seconds]\n"
                          "Chapter 15+: [--preset shore]\n"
                          "Chapter 16+: [--fog on|off] [--shadow-distance metres]\n"
                          "Chapter 17+: [--lightmap on|off] [--preset porch]\n"
                          "Chapter 18+: [--time hours]\n"
+                         "Chapter 18: [--walker-lamp off|point|spot] [--tone-map on|off] [--exposure EV]\n"
                          "Chapter 19+: [--terrain-lod on|off] [--terrain-cull on|off] [--terrain-view 0..3]\n"
                          "Chapter 19: [--benchmark-terrain]\n"
                          "Chapter 20: [--benchmark-streaming]\n"
@@ -332,6 +369,18 @@ int main(int argc, char** argv) {
     }
     if (options.dayHour && options.chapter < tinyworld::Chapter::DayCycle) {
         std::cerr << "Time options require chapter 18 or later.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.normalMaps && options.chapter < tinyworld::Chapter::Village) {
+        std::cerr << "Normal map options require chapter 13 or later.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.worldPreset == tinyworld::WorldPreset::Bridge && options.chapter != tinyworld::Chapter::Village) {
+        std::cerr << "The bridge close-up requires chapter 13.\n";
+        return EXIT_FAILURE;
+    }
+    if (options.lightingLabOptions && options.chapter != tinyworld::Chapter::DayCycle) {
+        std::cerr << "Walker lamp, tone mapping and exposure options require chapter 18.\n";
         return EXIT_FAILURE;
     }
     if ((options.lightmapEnabled || options.worldPreset == tinyworld::WorldPreset::Porch) &&

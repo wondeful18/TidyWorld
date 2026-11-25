@@ -9,7 +9,8 @@ struct SurfaceParameters {
     bakedIrradiance: f32,
     sampleMetallic: f32,
     sampleRoughness: f32,
-    pad: vec2<f32>,
+    emission: f32,
+    pad: f32,
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -27,7 +28,9 @@ struct DrawUniform {
     surface: SurfaceParameters,            // 类别与对应参数，地形的 w 为世界边长
     coast: vec4<f32>,               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
     air: FrameAtmosphere,           // 与水面共用的雾色、衰减和世界尺度
-    lighting: vec4<f32>,             // 环境亮度和日夜混合
+    lighting: vec4<f32>,             // 环境亮度、夜景混合、保留 HDR 能量、法线贴图开关
+    lampPositionAndPower: vec4<f32>, // xyz 为世界位置，w 为相对功率
+    lampForwardAndCone: vec4<f32>,    // xyz 为出光方向，w 为外锥余弦，点光用 -1
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawUniform;
@@ -70,19 +73,45 @@ fn vsEnvironmentWorld(@location(0) position: vec3<f32>, @location(1) normal: vec
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 阴影可见性只衰减太阳直射光，环境项保留背光面的轮廓。
+// 手持灯把距离衰减、聚光范围和表面朝向乘到一起。
 //————————————————————————————————————————————————————————————————————————————————
+fn lampDiffuse(position: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    if draw.lampPositionAndPower.w == 0.0 { return vec3<f32>(0.0); }
+    let toLamp = draw.lampPositionAndPower.xyz - position;
+    let distanceSquared = dot(toLamp, toLamp);
+    let lightDirection = toLamp * inverseSqrt(max(distanceSquared, 0.000001));
+    var cone = 1.0;
+    if draw.lampForwardAndCone.w >= 0.0 {
+        let cosAngle = dot(draw.lampForwardAndCone.xyz, -lightDirection);
+        // 外锥 35 度，内锥 20 度。边缘平滑收光。
+        cone = smoothstep(draw.lampForwardAndCone.w, 0.9396926, cosAngle);
+    }
+    let lambert = max(dot(normal, lightDirection), 0.0);
+    let falloff = cone * lambert / max(distanceSquared, 0.08);
+    return vec3<f32>(1.0, 0.69, 0.38) * (draw.lampPositionAndPower.w * falloff);
+}
+
+fn lightingRange(linear: vec3<f32>) -> vec3<f32> {
+    if draw.lighting.z > 0.5 { return linear; }
+    return clamp(linear, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// 阴影可见性只衰减太阳直射光，环境项保留背光面的轮廓。
 fn shade(input: VertexOutput, visibility: f32) -> vec3<f32> {
-    let facingSun = max(dot(normalize(input.normal), draw.towardSun.xyz), 0.0);
+    let normal = normalize(input.normal);
+    let facingSun = max(dot(normal, draw.towardSun.xyz), 0.0);
     let ambient = vec3<f32>(0.30, 0.34, 0.38) * draw.lighting.x;
     let direct = (facingSun * visibility) * draw.sunRadiance.xyz;
-    return clamp(input.color * (ambient + direct), vec3<f32>(0.0), vec3<f32>(1.0));
+    return lightingRange(input.color * (ambient + direct + lampDiffuse(input.worldPosition, normal)));
 }
 
 //————————————————————————————————————————————————————————————————————————————————
 // 在已含 Lambert 和阴影的线性底色上混入远处环境，掠射角度反射更明显。
 //————————————————————————————————————————————————————————————————————————————————
 fn shadeEnvironment(input: VertexOutput) -> vec3<f32> {
+    if draw.surface.emission > 0.0 {
+        return lightingRange(input.color * draw.surface.emission);
+    }
     let diffuse = shade(input, sunVisibility(input));
     if (draw.cameraAndReflection.w < 0.5 || input.reflectivity <= 0.0) {
         return diffuse;

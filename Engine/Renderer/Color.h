@@ -26,7 +26,7 @@ namespace tinyworld {
 [[nodiscard]] inline WGPUConstantEntry UnormEncoding(WGPUTextureFormat format) {
     WGPUConstantEntry entry = WGPU_CONSTANT_ENTRY_INIT;
     entry.key = {"encodeForUnorm", WGPU_STRLEN};
-    entry.value = IsSrgbFormat(format) ? 0.0 : 1.0;
+    entry.value = format == WGPUTextureFormat_RGBA8Unorm || format == WGPUTextureFormat_BGRA8Unorm ? 1.0 : 0.0;
     return entry;
 }
 

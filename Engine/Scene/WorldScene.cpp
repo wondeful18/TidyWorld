@@ -37,12 +37,14 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     auto roadLayout = std::move(road);
     const bool placeProps = canPlaceProps;
     const bool gltfProps = canUseGltfProps;
+    const bool useNormalMaps = normalMaps;
     auto placedProps = std::move(props);
     const auto vegetationSettings = vegetation;
     const auto waterSettings = water;
     const auto atmosphereSettings = atmosphere;
     const auto lightmapSetting = lightmapEnabled;
     const auto dayCycleSettings = dayCycle;
+    const auto lab = lightingLab;
     *this = WorldScene{};
     // 场景预设用于对照布局及太阳方向，沿用当前阴影设置。
     shadows = shadowSettings;
@@ -60,12 +62,14 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
     road = std::move(roadLayout);
     canPlaceProps = placeProps;
     canUseGltfProps = gltfProps;
+    normalMaps = useNormalMaps;
     props = std::move(placedProps);
     vegetation = vegetationSettings;
     water = waterSettings;
     atmosphere = atmosphereSettings;
     lightmapEnabled = lightmapSetting;
     dayCycle = dayCycleSettings;
+    lightingLab = lab;
     if (materials) {
         materials->spheres = false;
     }
@@ -100,6 +104,9 @@ void WorldScene::ApplyPreset(WorldPreset preset) {
         break;
     case WorldPreset::Porch:
         camera = kPorchCamera;
+        break;
+    case WorldPreset::Bridge:
+        camera = kBridgeCamera;
         break;
     case WorldPreset::Shore:
         camera = kShoreCamera;

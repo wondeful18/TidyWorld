@@ -18,7 +18,7 @@
 
 namespace tinyworld {
 
-enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials, Shore, Porch };  // 布局和游览预设
+enum class WorldPreset { Default, Overlap, Evening, Drive, Walk, Materials, Shore, Porch, Bridge };  // 布局和游览预设
 enum class MaterialView { Lit, Weights, Roughness, VertexColor };  // 地表材质的诊断通道
 enum class SkyMode { Cubemap, Panorama };  // 第四章的两种天空投影
 
@@ -53,6 +53,15 @@ struct DirectionalSun {
 struct DayCycleSettings {
     float hour{12.0f};  // 小时，午夜同属周期起点
     bool playing{};     // 拖动时间轴后暂停
+};
+
+enum class WalkerLamp { Off, Point, Spot };
+
+struct LightingLab {
+    static constexpr float kMaxExposure = 4.0f;
+    WalkerLamp lamp{WalkerLamp::Off};
+    bool toneMap{};       // 关闭时用旧的 SDR 截断作对照
+    float exposureEv{};   // 每增加 1 EV，线性亮度翻倍
 };
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -112,6 +121,7 @@ struct WorldScene {
     }};  // 西南坡、桥头、河口、海岬的固定机位
     static constexpr OrbitCamera kDayCamera{{9.0f, 1.4f, 1.6f}, -30.0f, 15.0f, 28.0f};
     static constexpr OrbitCamera kPorchCamera{{3.55f, 1.17f, 7.75f}, 24.0f, 22.0f, 9.0f};
+    static constexpr OrbitCamera kBridgeCamera{{0.0f, 0.19f, 0.0f}, 28.0f, 47.0f, 3.0f};
     static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
     static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
     static constexpr std::size_t kTreeIndex = 1;  // 固定树作为步行尺度参照
@@ -145,9 +155,11 @@ struct WorldScene {
     bool canPlaceProps{};  // 第十章启用物体摆放
     std::vector<PlacedProp> props;  // 保存的手摆资产实例
     bool canUseGltfProps{};  // 第十三章开启 glTF 原型与桥面查询
+    bool normalMaps{true};  // 同一机位比较网格法线与材质法线
     std::optional<VegetationSettings> vegetation;  // 由样地或规则生成的植被参数
     std::optional<WaterSettings> water;  // 水面调试及运行时间
     std::optional<DayCycleSettings> dayCycle;  // 第十八章驱动实时太阳与环境光
+    std::optional<LightingLab> lightingLab;   // 第十八章的实时提灯与 HDR 对照
     std::optional<bool> lightmapEnabled;  // 第十七章开启图集，值本身用于实时对照
     std::optional<AtmosphereSettings> atmosphere;  // 第十六章的雾和阴影距离预览
 

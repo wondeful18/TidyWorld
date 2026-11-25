@@ -153,6 +153,17 @@ void WorldEditor::DrawInspector() {
         ImGui::SameLine();
         jumpTo("Night", 21.0f);
         ImGui::Checkbox("Play", &day->playing);
+        if (auto& lab = mScene.lightingLab; lab) {
+            int lamp = static_cast<int>(lab->lamp);
+            if (ImGui::Combo("Walker lamp", &lamp, "Off\0Point\0Spot\0")) {
+                lab->lamp = static_cast<WalkerLamp>(lamp);
+            }
+            ImGui::Checkbox("HDR tone mapping", &lab->toneMap);
+            ImGui::BeginDisabled(!lab->toneMap);
+            ImGui::SliderFloat("Exposure", &lab->exposureEv, -LightingLab::kMaxExposure,
+                               LightingLab::kMaxExposure, "%+.1f EV", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::EndDisabled();
+        }
         if (ImGui::Button("Valley view")) mScene.camera = WorldScene::kDayCamera;
         ImGui::SameLine();
         if (ImGui::Button("Porch view")) mScene.camera = WorldScene::kPorchCamera;
@@ -220,6 +231,15 @@ void WorldEditor::DrawInspector() {
         return;
     }
     if (mScene.canPlaceProps && mSelected == kPropsPanel) {
+        if (mScene.canUseGltfProps) {
+            ImGui::Checkbox("Normal maps", &mScene.normalMaps);
+            const auto bridge = std::find_if(mScene.props.begin(), mScene.props.end(),
+                                             [](const auto& prop) { return prop.asset == kBridgeAsset; });
+            if (bridge != mScene.props.end() && ImGui::Button("Bridge close-up")) {
+                mScene.camera = WorldScene::kBridgeCamera;
+                mScene.camera.target = bridge->transform.position;
+            }
+        }
         DrawPropsPalette();
         return;
     }

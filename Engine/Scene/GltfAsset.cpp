@@ -104,7 +104,7 @@ GltfImage ReadImage(const cgltf_texture_view& view, const std::filesystem::path&
 //————————————————————————————————————————————————————————————————————————————————
 GltfMaterial ReadMaterial(const cgltf_material& source, const std::filesystem::path& directory) {
     if (source.alpha_mode != cgltf_alpha_mode_opaque || source.double_sided || source.extensions_count ||
-        source.normal_texture.texture || source.occlusion_texture.texture || source.emissive_texture.texture ||
+        source.occlusion_texture.texture || source.emissive_texture.texture ||
         source.emissive_factor[0] || source.emissive_factor[1] || source.emissive_factor[2] ||
         source.has_pbr_specular_glossiness || source.unlit) {
         throw std::runtime_error("Expected a single-sided opaque metallic-roughness material.");
@@ -115,8 +115,20 @@ GltfMaterial ReadMaterial(const cgltf_material& source, const std::filesystem::p
         !unitRange(pbr.metallic_factor) || !unitRange(pbr.roughness_factor)) {
         throw std::runtime_error("Material factors must be finite values between 0 and 1.");
     }
-    return {ReadImage(pbr.base_color_texture, directory), ReadImage(pbr.metallic_roughness_texture, directory),
-            glm::make_vec3(pbr.base_color_factor), pbr.metallic_factor, pbr.roughness_factor};
+    GltfMaterial material;
+    material.baseColor = ReadImage(pbr.base_color_texture, directory);
+    material.metalRough = ReadImage(pbr.metallic_roughness_texture, directory);
+    material.baseFactor = glm::make_vec3(pbr.base_color_factor);
+    material.metallicFactor = pbr.metallic_factor;
+    material.roughnessFactor = pbr.roughness_factor;
+    if (source.normal_texture.texture) {
+        if (!std::isfinite(source.normal_texture.scale)) {
+            throw std::runtime_error("Normal texture scale must be finite.");
+        }
+        material.normal = ReadImage(source.normal_texture, directory);
+        material.normalScale = source.normal_texture.scale;
+    }
+    return material;
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -132,8 +144,12 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
     const auto* normal = cgltf_find_accessor(&source, cgltf_attribute_type_normal, 0);
     const auto* uv = cgltf_find_accessor(&source, cgltf_attribute_type_texcoord, 0);
     const auto* bakeUv = cgltf_find_accessor(&source, cgltf_attribute_type_texcoord, 1);
-    const bool textured = source.material && (source.material->pbr_metallic_roughness.base_color_texture.texture ||
-                                             source.material->pbr_metallic_roughness.metallic_roughness_texture.texture);
+    const bool normalMapped = source.material && source.material->normal_texture.texture;
+    const bool textured = normalMapped || (source.material && (source.material->pbr_metallic_roughness.base_color_texture.texture ||
+                                                              source.material->pbr_metallic_roughness.metallic_roughness_texture.texture));
+    if (normalMapped && cgltf_find_accessor(&source, cgltf_attribute_type_tangent, 0)) {
+        throw std::runtime_error("This normal mapping lesson reconstructs tangents from TEXCOORD_0; authored tangents are unsupported.");
+    }
     if (!position || position->type != cgltf_type_vec3 || !normal || normal->type != cgltf_type_vec3 ||
         (textured && !uv) || (uv && uv->type != cgltf_type_vec2) ||
         (bakeUv && (bakeUv->type != cgltf_type_vec2 || bakeUv->count != position->count)) ||

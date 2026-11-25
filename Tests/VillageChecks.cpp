@@ -33,6 +33,10 @@ void CheckModels(const std::filesystem::path& root) {
             Require(material.baseColor.width > 1 && material.metalRough.width > 1, "Missing glTF textures.");
         }
         if (i == kBridgeAsset) {
+            const auto& decking = prototype.materials.at(prototype.primitives.front().material);
+            Require(decking.normal && decking.normal->width == 128 && decking.normal->height == 128 &&
+                        std::abs(decking.normalScale - 1.15f) < 0.0001f,
+                    "The cedar bridge normal map or its scale did not load.");
             float minZ = 0.0f, maxZ = 0.0f, minX = 0.0f, maxX = 0.0f;
             for (const auto& primitive : prototype.primitives) {
                 for (const auto& vertex : primitive.vertices) {

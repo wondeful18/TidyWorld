@@ -44,7 +44,8 @@ struct SurfaceParameters {
     float bakedIrradiance{};     // 光照图的线性辐照度范围
     float sampleMetallic{};      // 材质球金属度
     float sampleRoughness{};     // 材质球粗糙度
-    glm::vec2 padding{0.0f};     // 填齐 WGSL 的对齐要求
+    float emission{};           // 提灯模型的自发光倍率，普通表面为 0
+    float padding{};            // 填齐 WGSL 的对齐要求
 };
 
 struct DrawUniform {
@@ -59,10 +60,12 @@ struct DrawUniform {
     SurfaceParameters material;            // 材质类别和对应的参数
     glm::vec4 coast;               // 海岸开关、水位 Y、岸坡过渡的 X 起点和终点
     FrameAtmosphere air;           // 物体、植被与水面共用的距离参数
-    glm::vec4 lighting;             // 环境亮度与夜景混合，z/w 保留
+    glm::vec4 lighting;             // 环境亮度、夜景混合、保留 HDR 能量、法线贴图开关
+    glm::vec4 lampPositionAndPower{0.0f}; // xyz 为光源世界坐标，w 为相对功率
+    glm::vec4 lampForwardAndCone{0.0f};   // xyz 为出光方向，w 为外锥余弦，点光用 -1
 };
 
-static_assert(sizeof(DrawUniform) == 432);
+static_assert(sizeof(DrawUniform) == 464);
 
 //————————————————————————————————————————————————————————————————————————————————
 // 按统一布局创建物体绑定与颜色管线。

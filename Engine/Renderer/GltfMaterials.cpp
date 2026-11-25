@@ -34,10 +34,10 @@ TextureViewHandle UploadImage(WebGpuContext& gpu, const GltfImage& image, WGPUTe
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
-// 三张二维纹理共用采样器。绑定号 4–8 与 world.wgsl 对应。
+// 二维纹理共用采样器。绑定号 4–9 与 prop_gltf.wgsl 对应。
 //————————————————————————————————————————————————————————————————————————————————
 GltfMaterials::GltfMaterials(WebGpuContext& gpu) : mGpu(gpu) {
-    std::array<WGPUBindGroupLayoutEntry, 5> entries;
+    std::array<WGPUBindGroupLayoutEntry, 6> entries;
     for (std::uint32_t i = 0; i < entries.size(); ++i) {
         entries[i] = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
         entries[i].binding = i + 4;
@@ -48,6 +48,7 @@ GltfMaterials::GltfMaterials(WebGpuContext& gpu) : mGpu(gpu) {
         entries[i].texture.viewDimension = WGPUTextureViewDimension_2D;
     }
     entries[4].texture = entries[0].texture;
+    entries[5].texture = entries[0].texture;
     entries[2].sampler.type = WGPUSamplerBindingType_Filtering;
     entries[3].buffer.type = WGPUBufferBindingType_Uniform;
     entries[3].buffer.minBindingSize = 8 * sizeof(float);
@@ -64,6 +65,7 @@ GltfMaterials::GltfMaterials(WebGpuContext& gpu) : mGpu(gpu) {
     mSampler.reset(wgpuDeviceCreateSampler(gpu.Device(), &sampler));
     if (!mLayout || !mSampler) throw std::runtime_error("Cannot create glTF material layout.");
     mBlackLightmap = UploadLightmap({1, 1, {0, 0, 0, 0}});
+    mFlatNormal = UploadImage(gpu, {1, 1, {128, 128, 255, 255}}, WGPUTextureFormat_RGBA8Unorm);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -79,8 +81,10 @@ TextureViewHandle GltfMaterials::UploadLightmap(const GltfImage& source) const {
 BindGroupHandle GltfMaterials::Upload(const GltfMaterial& source, WGPUTextureView lightmap) const {
     const auto base = UploadImage(mGpu, source.baseColor, WGPUTextureFormat_RGBA8UnormSrgb);
     const auto metalRough = UploadImage(mGpu, source.metalRough, WGPUTextureFormat_RGBA8Unorm);
+    const auto normal = source.normal ? UploadImage(mGpu, *source.normal, WGPUTextureFormat_RGBA8Unorm)
+                                      : TextureViewHandle{};
     const std::array values{source.baseFactor.x, source.baseFactor.y, source.baseFactor.z, source.metallicFactor,
-                            source.roughnessFactor, 0.0f, 0.0f, 0.0f};
+                            source.roughnessFactor, source.normalScale, source.normal ? 1.0f : 0.0f, 0.0f};
     WGPUBufferDescriptor buffer = WGPU_BUFFER_DESCRIPTOR_INIT;
     buffer.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     buffer.size = sizeof(values);
@@ -88,7 +92,7 @@ BindGroupHandle GltfMaterials::Upload(const GltfMaterial& source, WGPUTextureVie
     if (!factors) throw std::runtime_error("Cannot create glTF material uniform.");
     wgpuQueueWriteBuffer(mGpu.Queue(), factors.get(), 0, values.data(), sizeof(values));
 
-    std::array<WGPUBindGroupEntry, 5> entries;
+    std::array<WGPUBindGroupEntry, 6> entries;
     for (std::uint32_t i = 0; i < entries.size(); ++i) {
         entries[i] = WGPU_BIND_GROUP_ENTRY_INIT;
         entries[i].binding = i + 4;
@@ -99,6 +103,7 @@ BindGroupHandle GltfMaterials::Upload(const GltfMaterial& source, WGPUTextureVie
     entries[3].buffer = factors.get();
     entries[3].size = sizeof(values);
     entries[4].textureView = lightmap ? lightmap : mBlackLightmap.get();
+    entries[5].textureView = normal ? normal.get() : mFlatNormal.get();
     WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
     binding.layout = mLayout.get();
     binding.entryCount = entries.size();

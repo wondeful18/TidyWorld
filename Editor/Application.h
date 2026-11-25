@@ -37,6 +37,9 @@ struct ApplicationOptions {
     std::optional<WaterView> waterView;             // 第十四章固定机位对照的显示模式
     std::optional<bool> fogEnabled;                 // 第十六章固定机位的雾开关
     std::optional<float> dayHour;                    // 第十八章从命令行选定场景时刻
+    std::optional<bool> normalMaps;                 // 第十三章的木板材质对照
+    LightingLab lightingLab;                        // 第十八章的实时提灯与曝光
+    bool lightingLabOptions{};
     std::optional<bool> lightmapEnabled;            // 第十七章固定机位的烘焙对照
     std::optional<float> shadowDistance;            // 第十六章阴影完全淡出的相机距离，米
     std::optional<EnvironmentSettings> environmentOverrides; // 第四章的背景模式和反射开关

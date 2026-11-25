@@ -68,6 +68,7 @@ add_library(TinyWorldEngine STATIC
     Engine/Renderer/WorldDraw.cpp
     Engine/Renderer/WorldDraw.h
     Engine/Renderer/WorldRenderer.cpp
+    Engine/Renderer/ToneMapping.cpp
     Engine/Renderer/WorldRenderer.h
     Engine/Renderer/WorldVertex.h
     Engine/Scene/AtmosphereSettings.h
@@ -169,6 +170,7 @@ add_executable(TinyWorld
     Assets/Shaders/sky.wgsl
     Assets/Shaders/world.wgsl
     Assets/Shaders/output_color.wgsl
+    Assets/Shaders/tone_mapping.wgsl
     Assets/Shaders/shadow.wgsl
     Assets/Shaders/pbr.wgsl
     Assets/Shaders/terrain.wgsl
@@ -206,7 +208,7 @@ foreach(target TinyWorldEngine TinyWorld TinyWorldMeshPacker)
     endif()
 endforeach()
 
-foreach(shader triangle world sky water fog output_color shadow pbr terrain prop_gltf vegetation sandbox)
+foreach(shader triangle world sky water fog output_color tone_mapping shadow pbr terrain prop_gltf vegetation sandbox)
     set(shader_source "${PROJECT_SOURCE_DIR}/Assets/Shaders/${shader}.wgsl")
     if(shader STREQUAL "sandbox")
         set(shader_source "${PROJECT_SOURCE_DIR}/Chapters/ch02/src/sandbox.wgsl")

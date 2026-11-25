@@ -30,31 +30,33 @@ Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索�
 | 20 | 分块加载与卸载 | [教程与驻留路线验收](Chapters/ch20/README.md) | [第 20 章](Chapters/ch20/ch20.pdf) |
 | 21 | 结业漫游与性能验收 | [教程、存档复走与性能记录](Chapters/ch21/README.md) | [第 21 章](Chapters/ch21/ch21.pdf) |
 
-[课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
+[前言](Chapters/PREFACE.md) · [21 章合订版 PDF](Chapters/TinyWorld.pdf) · [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
-## 章节快照
+## 获取源码与历史快照
 
-`ch06`–`ch21` 是第一版课程的带注释 Git 标签。可以在另一个目录打开历史版本，从当时的 README 构建，并运行相应章号：
+首次下载时使用完整克隆。从根目录构建一次，通过 `--chapter` 切换章节。各章教程给出对应的源码目录、资源和历史提交。
 
 ```sh
-git worktree add --detach ../TidyWorld-ch20 ch20
-cd ../TidyWorld-ch20
-git show --no-patch ch20
+git clone --branch main https://github.com/wondeful18/TidyWorld.git
+cd TidyWorld
 ```
 
-| 标签 | 历史位置 |
-| --- | --- |
-| `ch06`–`ch09` | 共用最早提供这四个可运行章节的提交 `fffd004`。通过对应 `--chapter` 比较阶段。 |
-| `ch10`–`ch12` | 共用最早提供这三章的提交 `e199d7b`。 |
-| `ch13`–`ch21` | 各自指向功能完成提交。从上一标签比较新增代码。 |
+要对照旧实现，可在仓库根目录将某章教程列出的提交检出到相邻的工作树。下面以第 20 章为例。
 
-后续修订保留这些标签的位置。新版课程发布时，可以为新的验收提交增设带版本号的标签。
+```sh
+git fetch origin main
+git worktree add --detach ../TidyWorld-ch20 715ba7c
+cd ../TidyWorld-ch20
+```
+
+第 03–09 章和第 10–12 章分别共享一个最早可运行的提交。第 13–21 章各有一个完成提交。本地已有对应的 `ch13`–`ch21` 标签时，也可直接用标签检出。
 
 ## 构建与运行完整工程
 
 按第 01 章准备编译工具、CMake 与 vcpkg，并设置 `VCPKG_ROOT`。也可以安装 Ninja，在 macOS arm64 从仓库根目录使用以下命令。 [Visual Studio 和 Xcode 的工程生成方法](Chapters/ch01/README.md#step-1--用-cmake-打开第一扇窗口)
 
 ```sh
+export VCPKG_ROOT="$PWD/.tools/vcpkg"
 cmake --preset macos-arm64-debug
 cmake --build --preset macos-arm64-debug
 out/build/macos-arm64-debug/bin/TinyWorld --chapter 01
@@ -95,6 +97,8 @@ out/build/macos-arm64-debug/bin/TinyWorld --chapter 21 --preset walk
 第 15 章沿碎石路跨桥抵达海岬，使用 `--preset shore` 看河口近景。第 16 章在 `Atmosphere` 独立调整距离雾和阴影距离。第 17 章在 `Baked lighting` 切换门廊的固定灯光。第 18 章在 `Day / night` 拖动时间轴，让太阳、阴影、天空和水面一起变化。第 19 章在 `Terrain performance` 对照 LOD 和裁剪。第 20 章观察磁盘解压、CPU 缓存和 GPU 上传。第 21 章扩大到 1 公里，增加级联阴影与相机相对坐标实验。可用 `--verify-tour` 复走源场景，或用 `--benchmark-capstone` 对照两种磁盘地图。
 
 Windows x64 使用 `windows-x64-debug` 构建 preset，详细环境和启动命令见章节教程。各平台的实测范围记录在对应章节。
+
+macOS 26.5 / Apple M4 Pro 已通过 Ninja Debug、Ninja Release 和 Xcode Debug 构建。Debug 构建的 8 项 CTest 均通过，21 章演示均完成 1280 × 720 的 Metal GPU 回读。
 
 ### Visual Studio 2022
 

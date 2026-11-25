@@ -107,8 +107,11 @@ WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesy
             scene.camera = WorldScene::kTerrainRoute[1];
         }
     }
+    if (options.worldPreset == WorldPreset::Bridge) scene.camera = WorldScene::kBridgeCamera;
     if (options.tourStop) scene.camera = kTourStops[*options.tourStop].camera;
     if (scene.dayCycle && options.dayHour) scene.dayCycle->hour = WrapDayHour(*options.dayHour);
+    scene.normalMaps = options.normalMaps.value_or(true);
+    if (options.chapter == Chapter::DayCycle) scene.lightingLab = options.lightingLab;
     return scene;
 }
 
