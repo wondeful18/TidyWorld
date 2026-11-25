@@ -111,7 +111,10 @@ PipelineHandle MakeSkyPipeline(WebGpuContext& gpu, WGPUTextureFormat colorFormat
     color.format = colorFormat;
     WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
     fragment.module = shader;
-    fragment.entryPoint = {IsSrgbFormat(colorFormat) ? "fsSkyLinear" : "fsSkyDisplay", WGPU_STRLEN};
+    fragment.entryPoint = {"fsSky", WGPU_STRLEN};
+    const auto encoding = UnormEncoding(colorFormat);
+    fragment.constantCount = 1;
+    fragment.constants = &encoding;
     fragment.targetCount = 1;
     fragment.targets = &color;
 
@@ -146,7 +149,7 @@ BufferHandle MakeSkyBuffer(WGPUDevice device, WGPUBufferUsage usage, std::uint64
 SkyRenderer::SkyRenderer(WebGpuContext& gpu, WGPUTextureFormat colorFormat,
                          WGPUTextureFormat depthFormat, const std::filesystem::path& assetRoot, bool withNight)
     : mGpu(gpu), mEnvironment(gpu, assetRoot / "environments" / "ch04" / "golden-gate-hills.jpg", withNight) {
-    const auto shader = LoadWgslModule(gpu, assetRoot / "shaders" / "sky.wgsl");
+    const auto shader = LoadWgslModule(gpu, assetRoot / "shaders" / "sky.wgsl", {"output_color.wgsl"});
     WGPUBindGroupLayoutEntry constants = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
     constants.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
     constants.buffer.type = WGPUBufferBindingType_Uniform;

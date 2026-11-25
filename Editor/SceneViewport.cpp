@@ -34,7 +34,7 @@ void SceneViewport::Build(WGPUDevice device, WorldEditor* world, float deltaSeco
                 if (size != mSize) {
                     Resize(device, size);
                 }
-                const ImTextureID id = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(mView.get()));
+                const ImTextureID id = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(mDisplayView.get()));
                 ImGui::Image(ImTextureRef{id}, available);
                 mVisible = true;
                 if (world) {
@@ -73,16 +73,23 @@ void SceneViewport::Resize(WGPUDevice device, PixelSize size) {
     descriptor.label = {"Scene Viewport color", WGPU_STRLEN};
     descriptor.size = {size.width, size.height, 1};
     descriptor.format = kColorFormat;
+    constexpr auto displayFormat = WGPUTextureFormat_RGBA8Unorm;
+    descriptor.viewFormatCount = 1;
+    descriptor.viewFormats = &displayFormat;
     descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
     TextureHandle texture(wgpuDeviceCreateTexture(device, &descriptor));
     if (!texture) {
         throw std::runtime_error("Cannot allocate Scene Viewport texture");
     }
     TextureViewHandle view(wgpuTextureCreateView(texture.get(), nullptr));
-    if (!view) {
+    WGPUTextureViewDescriptor display = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    display.format = displayFormat;
+    TextureViewHandle displayView(wgpuTextureCreateView(texture.get(), &display));
+    if (!view || !displayView) {
         throw std::runtime_error("Cannot create Scene Viewport texture view");
     }
     // 首先交还旧视图，再交还它所引用的纹理。
+    mDisplayView = std::move(displayView);
     mView = std::move(view);
     mTexture = std::move(texture);
     mSize = size;

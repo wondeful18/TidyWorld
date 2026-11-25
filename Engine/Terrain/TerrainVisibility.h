@@ -13,6 +13,7 @@ struct TerrainPreview {
 };
 
 struct TerrainDrawStats {
+    std::array<unsigned, 4> lods{}; // 相机通道各档实际提交的块数
     unsigned visible{};
     unsigned culled{};
     unsigned fine{};

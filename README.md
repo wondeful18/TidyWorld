@@ -32,6 +32,24 @@ Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索�
 
 [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
+## 章节快照
+
+`ch06`–`ch21` 是第一版课程的带注释 Git 标签。可以在另一个目录打开历史版本，从当时的 README 构建，并运行相应章号：
+
+```sh
+git worktree add --detach ../TidyWorld-ch20 ch20
+cd ../TidyWorld-ch20
+git show --no-patch ch20
+```
+
+| 标签 | 历史位置 |
+| --- | --- |
+| `ch06`–`ch09` | 共用最早提供这四个可运行章节的提交 `fffd004`。通过对应 `--chapter` 比较阶段。 |
+| `ch10`–`ch12` | 共用最早提供这三章的提交 `e199d7b`。 |
+| `ch13`–`ch21` | 各自指向功能完成提交。从上一标签比较新增代码。 |
+
+后续修订保留这些标签的位置。新版课程发布时，可以为新的验收提交增设带版本号的标签。
+
 ## 构建与运行完整工程
 
 按第 01 章准备编译工具、CMake 与 vcpkg，并设置 `VCPKG_ROOT`。也可以安装 Ninja，在 macOS arm64 从仓库根目录使用以下命令。 [Visual Studio 和 Xcode 的工程生成方法](Chapters/ch01/README.md#step-1--用-cmake-打开第一扇窗口)
@@ -74,7 +92,7 @@ out/build/macos-arm64-debug/bin/TinyWorld --chapter 21 --preset walk
 
 第 13 章用 `--preset walk` 从村口走上木桥。第 14 章在 `Water` 属性中切换水深、反射和隐藏水面的对照。
 
-第 15 章沿碎石路跨桥抵达海岬，使用 `--preset shore` 看河口近景。第 16 章在 `Atmosphere` 独立调整距离雾和阴影距离。第 17 章在 `Baked lighting` 切换门廊的固定灯光。第 18 章在 `Day / night` 拖动时间轴，让太阳、阴影、天空和水面一起变化。第 19、20 章在 `Terrain performance` 对照提交、驻留和上传计数。第 21 章从林地走到新海岬，并用 `--verify-tour` 复走存档、用 `--benchmark-capstone` 比较两种地图。
+第 15 章沿碎石路跨桥抵达海岬，使用 `--preset shore` 看河口近景。第 16 章在 `Atmosphere` 独立调整距离雾和阴影距离。第 17 章在 `Baked lighting` 切换门廊的固定灯光。第 18 章在 `Day / night` 拖动时间轴，让太阳、阴影、天空和水面一起变化。第 19 章在 `Terrain performance` 对照 LOD 和裁剪。第 20 章观察磁盘解压、CPU 缓存和 GPU 上传。第 21 章扩大到 1 公里，增加级联阴影与相机相对坐标实验。可用 `--verify-tour` 复走源场景，或用 `--benchmark-capstone` 对照两种磁盘地图。
 
 Windows x64 使用 `windows-x64-debug` 构建 preset，详细环境和启动命令见章节教程。各平台的实测范围记录在对应章节。
 
@@ -87,7 +105,7 @@ $env:VCPKG_ROOT = (Resolve-Path .tools\vcpkg).Path
 cmake --preset windows-x64-vs2022
 ```
 
-打开 `out/build/windows-x64-vs2022/TinyWorld.sln`，选择 `Debug | x64`。启动项目是 `TinyWorld`，默认运行第 02 章。在 `Editor/main.cpp` 或 `Engine/Renderer/WorldRenderer.cpp` 设置断点后按 **F5** 调试。按 **Ctrl+F5** 直接运行。在 `TinyWorld` 项目的「属性 → 调试 → 命令参数」中修改 `--chapter` 的章号即可切换。
+打开 `out/build/windows-x64-vs2022/TinyWorld.sln`，选择 `Debug | x64`。启动项目是 `TinyWorld`，默认运行第 02 章。在 `Editor/main.cpp` 或 `Chapters/ch02/src/SandboxRenderer.cpp` 设置断点后按 **F5** 调试。按 **Ctrl+F5** 直接运行。在 `TinyWorld` 项目的「属性 → 调试 → 命令参数」中修改 `--chapter` 的章号即可切换。
 
 ## 目录
 

@@ -7,8 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <memory>
+#include <optional>
 
 namespace tinyworld {
+
+class ChunkCache;
 
 enum class BrushMode { Raise, Lower, Smooth, Flatten };  // 地形样点的编辑方式
 
@@ -32,17 +36,27 @@ public:
     static constexpr float kChunkSize = kCells * kSpacing;
     static constexpr int kSmallRadius = 3;
     static constexpr int kLargeRadius = 5;
-    static constexpr std::size_t kMaxChunkCount = 4 * kLargeRadius * kLargeRadius;
+    static constexpr std::size_t kMaxChunkCount = 32 * 32;
 
     explicit constexpr TerrainGrid(bool large = false) : mRadius(large ? kLargeRadius : kSmallRadius) {}
+    //————————————————————————————————————————————————————————————————————————————————
+    // 结业地图用 32 × 32 个 32 米块，入门样区保留原来的半米采样。
+    //————————————————————————————————————————————————————————————————————————————————
+    static constexpr TerrainGrid Exploration() { return TerrainGrid(16, 32, 1.0f); }
+    [[nodiscard]] constexpr int Cells() const { return mCells; }
+    [[nodiscard]] constexpr float Spacing() const { return mSpacing; }
+    [[nodiscard]] constexpr float ChunkSize() const { return mCells * mSpacing; }
+    [[nodiscard]] constexpr bool Contains(glm::ivec2 key) const {
+        return key.x >= FirstKey() && key.y >= FirstKey() && key.x < EndKey() && key.y < EndKey();
+    }
     constexpr bool operator==(const TerrainGrid&) const = default;
     [[nodiscard]] constexpr int FirstKey() const { return -mRadius; }
     [[nodiscard]] constexpr int EndKey() const { return mRadius; }
     [[nodiscard]] constexpr int Side() const { return 2 * mRadius; }
-    [[nodiscard]] constexpr int FirstSample() const { return FirstKey() * kCells; }
-    [[nodiscard]] constexpr int LastSample() const { return EndKey() * kCells; }
+    [[nodiscard]] constexpr int FirstSample() const { return FirstKey() * mCells; }
+    [[nodiscard]] constexpr int LastSample() const { return EndKey() * mCells; }
     [[nodiscard]] constexpr int SampleSide() const { return LastSample() - FirstSample() + 1; }
-    [[nodiscard]] constexpr float HalfExtent() const { return mRadius * kChunkSize; }
+    [[nodiscard]] constexpr float HalfExtent() const { return mRadius * ChunkSize(); }
     [[nodiscard]] constexpr float WalkLimit() const { return HalfExtent() - 0.35f; }
     [[nodiscard]] constexpr std::size_t ChunkCount() const { return Side() * Side(); }
     [[nodiscard]] std::size_t SampleIndex(int x, int z) const;
@@ -51,11 +65,15 @@ public:
     [[nodiscard]] std::size_t Index(glm::ivec2 key) const;
 
 private:
-    int mRadius;
+    constexpr TerrainGrid(int radius, int cells, float spacing)
+        : mRadius(radius), mCells(cells), mSpacing(spacing) {}
+    int mRadius;                 // 原点两侧各有多少块
+    int mCells{kCells};           // 每块沿一轴的格数
+    float mSpacing{kSpacing};     // 样点间距，单位为米
 };
 
 //————————————————————————————————————————————————————————————————————————————————
-// 一份覆盖世界原点两侧的规则采样网格。所有块读取同一份高度数组。
+// 规则高度网格的查询接口。编辑使用整表，磁盘构网与步行使用各自的块数据。
 //————————————————————————————————————————————————————————————————————————————————
 class HeightField {
 public:
@@ -77,6 +95,13 @@ public:
     // 用第六章的缓坡与两侧丘陵填满全局采样网格。
     //————————————————————————————————————————————————————————————————————————————————
     explicit HeightField(TerrainGrid grid = TerrainGrid{});
+    //————————————————————————————————————————————————————————————————————————————————
+    // 后台构网使用一块含幽灵边界的样点，步行端只借用驻留缓存。
+    //————————————————————————————————————————————————————————————————————————————————
+    HeightField(TerrainGrid grid, glm::ivec2 key, Samples halo);
+    HeightField(TerrainGrid grid, std::shared_ptr<ChunkCache> cache);
+    [[nodiscard]] bool IsStreamed() const { return static_cast<bool>(mCache); }
+    [[nodiscard]] std::optional<float> TryHeight(glm::vec2 xz, bool request = false) const;
     [[nodiscard]] TerrainGrid Grid() const { return mGrid; }
 
     //————————————————————————————————————————————————————————————————————————————————
@@ -130,6 +155,8 @@ private:
     //————————————————————————————————————————————————————————————————————————————————
     void Invalidate(glm::ivec2 low, glm::ivec2 high);
 
+    std::optional<glm::ivec2> mTile;  // 构网时的块键，空值表示非局部高度场
+    std::shared_ptr<ChunkCache> mCache; // 游览时的 CPU 高度缓存，空值表示内存样点
     TerrainGrid mGrid;  // 与样点表、修订号和块键映射共用的布局
     Samples mHeights;  // 按 Z 行存储高度，单位为米
     std::uint64_t mRevision{};  // 当前高度数组的修订号

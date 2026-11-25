@@ -1,6 +1,8 @@
 #include "Editor/Application.h"
 
-#include "Engine/Scene/Capstone.h"
+#include "Editor/Benchmarks.h"
+#include "Editor/ChapterPresets.h"
+#include "Editor/WorldDemo.h"
 #include "Engine/Scene/DayCycle.h"
 
 #include "Editor/EditorUi.h"
@@ -32,141 +34,6 @@
 
 namespace tinyworld {
 namespace {
-
-//————————————————————————————————————————————————————————————————————————————————
-// 复用小屋与小车预设，并在创建 GPU 资源前确定本章是否提供阴影。
-//————————————————————————————————————————————————————————————————————————————————
-WorldScene CreateWorldScene(const ApplicationOptions& options, const std::filesystem::path& root) {
-    WorldScene scene;
-    const bool terrainChapter = options.chapter >= Chapter::Terrain;
-    const bool walkChapter = options.chapter == Chapter::Walk || terrainChapter;
-    const bool hasSky = options.chapter == Chapter::Sky || walkChapter;
-    if (options.chapter == Chapter::SunShadows || hasSky) {
-        scene.shadows = options.shadowOverrides.value_or(ShadowSettings{});
-        if (terrainChapter && !options.shadowOverrides) {
-            // 对扩大的太阳投影实测偏移，在平缓地表抑制自阴影条纹。
-            scene.shadows->depthBias = 0.0012f;
-        }
-    }
-    if (hasSky) {
-        scene.environment = options.environmentOverrides.value_or(EnvironmentSettings{});
-    }
-    if (walkChapter) {
-        scene.spawn.emplace();
-    }
-    if (terrainChapter) {
-        scene.terrain.emplace();
-        scene.canPreviewLod = options.chapter == Chapter::Terrain;
-        scene.previewLod = options.lodPreview;
-        scene.canSculpt = options.chapter >= Chapter::Sculpt;
-        scene.showChunkBorders = options.chunkBorders;
-    }
-    auto scenePath = options.scenePath;
-    if (options.chapter >= Chapter::Materials) {
-        scene.materials.emplace();
-        scene.paint.emplace();
-        if (scenePath.empty() && options.worldPreset != WorldPreset::Overlap && options.worldPreset != WorldPreset::Evening) {
-            scenePath = root / "scenes" / "ch07" / "valley.json";
-        }
-    }
-    if (options.chapter >= Chapter::Road) {
-        scene.road.emplace();
-    }
-    scene.canPlaceProps = options.chapter >= Chapter::Props;
-    scene.canUseGltfProps = options.chapter >= Chapter::Village;
-    if (scene.canUseGltfProps && options.scenePath.empty()) {
-        scenePath = options.chapter >= Chapter::Coast ? root / "scenes" / "ch15" / "coast.json"
-                                                       : root / "scenes" / "ch13" / "village.json";
-    }
-    if (options.chapter >= Chapter::Meadow) {
-        scene.vegetation.emplace();
-        if (options.chapter >= Chapter::Ecology) scene.vegetation->mode = VegetationMode::TerrainRules;
-    }
-    if (options.chapter >= Chapter::Water) {
-        scene.water.emplace();
-        scene.water->coast = options.chapter >= Chapter::Coast;
-        scene.water->view = options.waterView.value_or(WaterView::Lit);
-        scene.water->seconds = options.waterTime.value_or(0.0f);
-    }
-    if (options.chapter >= Chapter::Atmosphere) {
-        scene.atmosphere.emplace();
-        if (options.fogEnabled) scene.atmosphere->fogEnabled = *options.fogEnabled;
-        if (options.shadowDistance) scene.atmosphere->shadowDistance = *options.shadowDistance;
-    }
-    if (options.chapter >= Chapter::Lightmap) {
-        scene.lightmapEnabled = options.lightmapEnabled.value_or(true);
-        if (options.scenePath.empty()) scenePath = root / "scenes" / "ch17" / "porch.json";
-    }
-    if (options.chapter >= Chapter::DayCycle) scene.dayCycle.emplace();
-    scene.capstone = options.chapter == Chapter::Capstone;
-    scene.streamTerrain = options.chapter >= Chapter::TerrainStreaming;
-    if (scene.capstone && options.scenePath.empty()) scenePath = root / "scenes" / "ch21" / "tour.json";
-    if (options.chapter >= Chapter::TerrainVisibility) {
-        scene.terrainPreview = TerrainPreview{options.terrainLod.value_or(true), options.terrainCull.value_or(true)};
-    }
-    if (scenePath.empty()) {
-        scene.ApplyPreset(options.worldPreset);
-    } else {
-        LoadScene(scenePath, scene);
-        if (scene.vegetation && options.scenePath.empty() && !scene.canUseGltfProps) {
-            scene.camera = {{0.0f, 0.5f, 2.0f}, 13.0f, 30.0f, 38.0f};
-        }
-        if (options.shadowOverrides) {
-            scene.shadows = options.shadowOverrides;
-        }
-        if (options.environmentOverrides) {
-            scene.environment = options.environmentOverrides;
-        }
-        if (scene.dayCycle && !scene.capstone && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
-            scene.camera = WorldScene::kDayCamera;
-        }
-        if (options.worldPreset == WorldPreset::Porch) scene.camera = WorldScene::kPorchCamera;
-        if (options.worldPreset == WorldPreset::Shore) scene.camera = WorldScene::kShoreCamera;
-        scene.SetDriving(options.worldPreset == WorldPreset::Drive);
-        scene.SetWalking(options.worldPreset == WorldPreset::Walk);
-        if (scene.materials) {
-            scene.materials->spheres = options.worldPreset == WorldPreset::Materials;
-        }
-    }
-    if (scene.terrainPreview && !scene.IsWalking()) {
-        if (options.terrainView) scene.camera = WorldScene::kTerrainRoute[*options.terrainView];
-        else if (!scene.capstone && options.scenePath.empty() && options.worldPreset == WorldPreset::Default) {
-            scene.camera = WorldScene::kTerrainRoute[1];
-        }
-    }
-    if (options.tourStop) scene.camera = kTourStops[*options.tourStop].camera;
-    if (scene.dayCycle && options.dayHour) scene.dayCycle->hour = WrapDayHour(*options.dayHour);
-    return scene;
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 将小屋演示的 CPU 场景、GPU 资源和面板绑定到同一个局部生命周期。
-//————————————————————————————————————————————————————————————————————————————————
-struct WorldDemo {
-    WorldScene scene;       // 编辑器与渲染器共同使用的场景
-    WorldRenderer renderer; // 场景模型与深度绘制管线
-    WorldEditor editor;    // 借用本对象的场景并接入 ImGui
-
-    //————————————————————————————————————————————————————————————————————————————————
-    // 按初始场景设置上传网格，并将同一场景交由编辑器和渲染器使用。
-    //————————————————————————————————————————————————————————————————————————————————
-    WorldDemo(WebGpuContext& gpu, WGPUTextureFormat format,
-              const std::filesystem::path& root, const ApplicationOptions& options)
-        : scene(CreateWorldScene(options, root)), renderer(gpu, format, scene, root),
-          editor(scene, options.scenePath, options.sculptTools || options.chapter == Chapter::Sculpt,
-                 renderer.PaintPreviews(), &renderer.VegetationStatistics(), &renderer.TerrainStatistics(),
-                 &renderer.StreamStatistics(), &renderer.SceneDraws()) {}
-
-    //————————————————————————————————————————————————————————————————————————————————
-    // 禁用复制和隐式移动，使 editor 对 scene 的借用始终指向本实例。
-    //————————————————————————————————————————————————————————————————————————————————
-    WorldDemo(const WorldDemo&) = delete;
-
-    //————————————————————————————————————————————————————————————————————————————————
-    // 场景通过预设原地更新，整套演示对象在应用中保持固定地址。
-    //————————————————————————————————————————————————————————————————————————————————
-    WorldDemo& operator=(const WorldDemo&) = delete;
-};
 
 using Demo = std::variant<TriangleRenderer, WorldDemo>;
 
@@ -204,7 +71,7 @@ CarInput ReadDirectRoamInput(GLFWwindow* window) {
 //————————————————————————————————————————————————————————————————————————————————
 void EncodeScene(Demo& demo, WGPUCommandEncoder encoder, WGPUTextureView target, PixelSize size) {
     if (auto* world = std::get_if<WorldDemo>(&demo)) {
-        world->renderer.Encode(encoder, target, size, world->scene);
+        world->Encode(encoder, target, size);
     } else {
         std::get<TriangleRenderer>(demo).Encode(encoder, target);
     }
@@ -285,14 +152,15 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
         if (!encoder) {
             throw std::runtime_error("Cannot create capture command encoder");
         }
+        if (!editor && world && world->scene.IsWalking()) world->scene.UpdateWalk({}, 0.0);
         EncodeFrame(encoder.get(), capture.View(), demo, editor, log, size, 0.0);
-        if (world && !world->renderer.StreamingSettled()) {
+        if (world && !world->StreamingSettled()) {
             SubmitFrame(gpu, encoder.get());
             if (std::chrono::steady_clock::now() >= deadline) {
                 throw std::runtime_error("Chunk streaming capture timed out.");
             }
             stableFrames = 0;
-            world->renderer.WaitForChunkData();
+            world->WaitForChunkData();
             continue;
         }
         if (++stableFrames == 3) {
@@ -303,250 +171,6 @@ void CaptureFrames(WebGpuContext& gpu, Demo& demo, EditorUi* editor,
     capture.Write(gpu, path);
     gpu.WaitForSubmittedWork();
     log.Write("CAPTURE", "wrote " + path.string());
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 按同一机位与分辨率离屏绘制。逐帧等待 GPU，以区分 CPU 提交和包含 GPU 的整帧耗时。
-//————————————————————————————————————————————————————————————————————————————————
-void BenchmarkVegetation(WebGpuContext& gpu, WorldDemo& world) {
-    using Clock = std::chrono::steady_clock;
-    using Milliseconds = std::chrono::duration<double, std::milli>;
-    constexpr PixelSize size{1280, 720};
-    constexpr int warmup = 24;
-    constexpr int samples = 120;
-    constexpr int middle = samples / 2;
-    constexpr int p95 = (samples * 95 + 99) / 100 - 1;
-    FrameCapture target(gpu, size);
-    for (const bool instanced : {false, true}) {
-        world.scene.vegetation->instanced = instanced;
-        std::array<double, samples> submit{}, complete{};
-        for (int frame = -warmup; frame < samples; ++frame) {
-            const auto start = Clock::now();
-            EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
-            if (!encoder) throw std::runtime_error("Cannot create benchmark command encoder.");
-            world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
-            SubmitFrame(gpu, encoder.get());
-            const auto queued = Clock::now();
-            // 原生队列栅栏直接等 GPU，避免初始化轮询的毫秒级休眠进入测量。
-            wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
-            gpu.ProcessEvents();
-            const auto finished = Clock::now();
-            if (frame >= 0) {
-                submit[frame] = Milliseconds(queued - start).count();
-                complete[frame] = Milliseconds(finished - start).count();
-            }
-        }
-        std::sort(submit.begin(), submit.end());
-        std::sort(complete.begin(), complete.end());
-        const auto& stats = world.renderer.VegetationStatistics();
-        std::printf("%s | %ux%u | %d frames | grass %u tree %u rock %u | color draws %u shadow draws %u"
-                    " | CPU p50 %.3f ms | complete p50 %.3f ms p95 %.3f ms\n",
-                    instanced ? "Instanced" : "One draw per plant", size.width, size.height, samples,
-                    stats.instances[0], stats.instances[1], stats.instances[2], stats.colorDraws, stats.shadowDraws,
-                    (submit[middle - 1] + submit[middle]) * 0.5,
-                    (complete[middle - 1] + complete[middle]) * 0.5, complete[p95]);
-    }
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 四个机位各测 24 帧。固定光照、水相位和输出尺寸，每帧等 GPU 完成再计整帧耗时。
-//————————————————————————————————————————————————————————————————————————————————
-void BenchmarkTerrain(WebGpuContext& gpu, WorldDemo& world) {
-    using Clock = std::chrono::steady_clock;
-    using Milliseconds = std::chrono::duration<double, std::milli>;
-    constexpr PixelSize size{1280, 720};
-    constexpr int samplesPerView = 24;
-    constexpr int frames = samplesPerView * static_cast<int>(WorldScene::kTerrainRoute.size());
-    FrameCapture target(gpu, size);
-    for (const auto [name, lod, cull] : {
-         std::tuple{"full", false, false}, std::tuple{"lod", true, false},
-         std::tuple{"cull", false, true}, std::tuple{"lod+cull", true, true}}) {
-        world.scene.terrainPreview = TerrainPreview{lod, cull};
-        std::array<double, frames> elapsed{};
-        unsigned blocks{}, color{}, shadow{};
-        int sample = 0;
-        for (const auto& pose : WorldScene::kTerrainRoute) {
-            world.scene.camera = pose;
-            for (int i = -8; i < samplesPerView; ++i) {
-                const auto start = Clock::now();
-                EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
-                if (!encoder) throw std::runtime_error("Cannot create terrain benchmark encoder.");
-                world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
-                SubmitFrame(gpu, encoder.get());
-                wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
-                gpu.ProcessEvents();
-                if (i < 0) continue;
-                elapsed[sample++] = Milliseconds(Clock::now() - start).count();
-                const auto& stats = world.renderer.TerrainStatistics();
-                blocks += stats.visible;
-                color += stats.colorTriangles;
-                shadow += stats.shadowTriangles;
-            }
-        }
-        std::sort(elapsed.begin(), elapsed.end());
-        std::printf("%s | %d frames | visible %.2f | color triangles %.0f | shadow triangles %.0f"
-                    " | p50 %.3f ms | p95 %.3f ms\n", name, frames,
-                    double(blocks) / frames, double(color) / frames, double(shadow) / frames,
-                    (elapsed[frames / 2 - 1] + elapsed[frames / 2]) * 0.5, elapsed[(frames * 95 + 99) / 100 - 1]);
-    }
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 走固定块键路线，测量实时编码使用的同一套请求、驻留和上传预算。
-//————————————————————————————————————————————————————————————————————————————————
-void BenchmarkStreaming(WebGpuContext& gpu, WorldDemo& world) {
-    using Clock = std::chrono::steady_clock;
-    constexpr PixelSize size{1280, 720};
-    FrameCapture target(gpu, size);
-    const auto frame = [&] {
-        EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
-        if (!encoder) throw std::runtime_error("Cannot create streaming benchmark encoder.");
-        world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
-        SubmitFrame(gpu, encoder.get());
-        wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
-        gpu.ProcessEvents();
-        const auto& stats = world.renderer.StreamStatistics();
-        if (stats.resident > ChunkStreamer::kMaxResident ||
-            stats.uploaded > ChunkStreamer::kUploadsPerFrame ||
-            stats.queue.queued + stats.queue.working + stats.queue.ready > ChunkStreamer::kMaxResident) {
-            throw std::runtime_error("Streaming exceeded a frame or residency limit.");
-        }
-    };
-    const auto visit = [&](const char* name, glm::ivec2 key, bool settle = true) {
-        world.scene.camera = WorldScene::kTerrainRoute[1];
-        const auto center = (glm::vec2(key) + 0.5f) * HeightField::kChunkSize;
-        world.scene.camera.target.x = center.x;
-        world.scene.camera.target.z = center.y;
-        const auto started = Clock::now();
-        frame();
-        const auto& entered = world.renderer.StreamStatistics();
-        const auto stillQueued = entered.queue.queued + entered.queue.working + entered.queue.ready;
-        int frames = 1;
-        while (settle && !world.renderer.StreamingSettled()) {
-            if (Clock::now() - started > std::chrono::seconds(12)) {
-                throw std::runtime_error("Chunk streaming route timed out.");
-            }
-            world.renderer.WaitForChunkData();
-            frame();
-            ++frames;
-        }
-        const auto& stats = world.renderer.StreamStatistics();
-        std::printf("%s | key %d,%d | requested %u | pending after entry %u | resident %u | bytes %zu"
-                    " | evicted total %u | %d frames | %.3f ms\n",
-                    name, key.x, key.y, stats.queue.wanted, stillQueued, stats.resident, stats.residentBytes,
-                    stats.evicted, frames, std::chrono::duration<double, std::milli>(Clock::now() - started).count());
-    };
-    visit("start", {-2, 1});
-    visit("step 1", {-1, 0});
-    visit("step 2", {0, -1});
-    visit("step 3", {1, -1});
-    visit("cape", {2, -2});
-    visit("quick turn A", {-2, 1}, false);
-    visit("quick turn B", {2, -2}, false);
-    visit("return", {-2, 1});
-    const auto& stats = world.renderer.StreamStatistics();
-    if (stats.evicted == 0) throw std::runtime_error("Route did not unload any terrain.");
-    std::printf("peak resident %u | peak upload %zu bytes/frame | limit %u chunks/frame\n",
-                stats.peakResident, stats.peakUploadedBytes, ChunkStreamer::kUploadsPerFrame);
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 在保存前和重开后用同一个步行控制器走完全程，并报告可复现的路线量。
-//————————————————————————————————————————————————————————————————————————————————
-void VerifyTour(const ApplicationOptions& options, const std::filesystem::path& root) {
-    auto scene = CreateWorldScene(options, root);
-    const auto original = WalkCapstone(scene);
-    scene.SetWalking(false);
-    SaveScene(options.tourVerificationPath, scene);
-    LoadScene(options.tourVerificationPath, scene);
-    const auto reopened = WalkCapstone(scene);
-    if (original.end != reopened.end || original.distance != reopened.distance ||
-        original.steps != reopened.steps || original.chunksVisited != reopened.chunksVisited) {
-        throw std::runtime_error("The reopened scene produced a different walk.");
-    }
-    std::printf("Tour before and after reload | %.2f m | %u unique chunks | %u input steps"
-                " | bridge yes | min water clearance %.3f m | finish %.2f,%.2f,%.2f\n",
-                reopened.distance, reopened.chunksVisited, reopened.steps, reopened.minimumWaterClearance,
-                reopened.end.x, reopened.end.y, reopened.end.z);
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 对比两份场景在共同范围内的固定相机轨迹。开场加载和预热不进入采样。
-//————————————————————————————————————————————————————————————————————————————————
-void BenchmarkCapstone(WebGpuContext& gpu, const std::filesystem::path& root) {
-    using Clock = std::chrono::steady_clock;
-    using Milliseconds = std::chrono::duration<double, std::milli>;
-    constexpr PixelSize size{1280, 720};
-    constexpr std::array targets{glm::vec3{-1.0f, 1.0f, 18.0f}, glm::vec3{0.0f, 1.0f, 7.7f},
-                                 glm::vec3{0.0f, 1.0f, 0.0f}, glm::vec3{4.6f, 1.0f, -10.7f},
-                                 glm::vec3{15.7f, 1.6f, -13.2f}};
-    constexpr int framesPerLeg = 30;
-    constexpr int frameCount = (targets.size() - 1) * framesPerLeg;
-    FrameCapture target(gpu, size);
-    const auto sample = root / "scenes" / "ch17" / "porch.json";
-    ApplicationOptions options;
-    options.chapter = Chapter::Capstone;
-    options.scenePath = sample;
-    options.dayHour = 12.0f;
-    options.waterTime = 0.0f;
-    WorldDemo world(gpu, gpu.SurfaceFormat(), root, options);
-    const auto frame = [&] {
-        EncoderHandle encoder(wgpuDeviceCreateCommandEncoder(gpu.Device(), nullptr));
-        if (!encoder) throw std::runtime_error("Cannot create tour benchmark encoder.");
-        world.renderer.Encode(encoder.get(), target.View(), size, world.scene);
-        SubmitFrame(gpu, encoder.get());
-        wgpuDevicePoll(gpu.Device(), WGPU_TRUE, nullptr);
-        gpu.ProcessEvents();
-    };
-    const auto warm = [&] {
-        world.scene.camera = {targets.front(), -20.0f, 21.0f, 13.0f};
-        const auto deadline = Clock::now() + std::chrono::seconds(12);
-        frame();
-        while (!world.renderer.StreamingSettled()) {
-            if (Clock::now() >= deadline) throw std::runtime_error("Could not warm up the tour benchmark.");
-            world.renderer.WaitForChunkData();
-            frame();
-        }
-    };
-    for (const bool large : {false, true}) {
-        if (large) LoadScene(root / "scenes" / "ch21" / "tour.json", world.scene);
-        world.scene.dayCycle->hour = 12.0f;
-        warm();
-        for (int i = 0; i < 12; ++i) frame();
-        std::array<double, frameCount> elapsed{};
-        unsigned draws{}, peakDraws{}, live{}, peakLive{};
-        std::size_t peakBytes{};
-        for (int i = 0; i < frameCount; ++i) {
-            const int leg = i / framesPerLeg;
-            const float t = static_cast<float>(i % framesPerLeg + 1) / framesPerLeg;
-            world.scene.camera.target = glm::mix(targets[leg], targets[leg + 1], t);
-            const auto start = Clock::now();
-            frame();
-            elapsed[i] = Milliseconds(Clock::now() - start).count();
-            const auto& stream = world.renderer.StreamStatistics();
-            const auto calls = world.renderer.SceneDraws();
-            draws += calls;
-            live += stream.resident;
-            peakDraws = std::max(peakDraws, calls);
-            peakLive = std::max(peakLive, stream.resident);
-            peakBytes = std::max(peakBytes, stream.residentBytes);
-        }
-        std::sort(elapsed.begin(), elapsed.end());
-        std::printf("%s | %zu world chunks | %d frames | p50 %.3f ms | p95 %.3f ms"
-                    " | draws mean %.1f peak %u | resident mean %.1f peak %u | peak %zu bytes\n",
-                    large ? "Expanded 80 m" : "Sample 48 m", world.scene.terrain->Grid().ChunkCount(), frameCount,
-                    (elapsed[frameCount / 2 - 1] + elapsed[frameCount / 2]) * 0.5,
-                    elapsed[(frameCount * 95 + 99) / 100 - 1], double(draws) / frameCount, peakDraws,
-                    double(live) / frameCount, peakLive, peakBytes);
-    }
-    // 回切原样区，复用同一个 GPU 渲染器验证索引、边界和水面绑定。
-    LoadScene(sample, world.scene);
-    warm();
-    if (world.scene.terrain->Grid() != TerrainGrid{} ||
-        world.renderer.StreamStatistics().resident != 15u) {
-        throw std::runtime_error("The renderer did not restore the small streaming grid.");
-    }
-    std::puts("GPU grid reload: 48 m -> 80 m -> 48 m passed.");
 }
 
 }  // namespace
@@ -569,72 +193,7 @@ int RunApplication(const ApplicationOptions& options) {
         return 0;
     }
     const bool isWorld = options.chapter != Chapter::Triangle;
-    const char* title = options.direct ? "TinyWorld ch01 - Direct Triangle" : "TinyWorld ch01 - Editor";
-    const char* ready = "WGSL and triangle pipeline validated";
-    if (options.chapter == Chapter::World) {
-        title = "TinyWorld ch02 - Cottage, Tree and Sun";
-        ready = "Chapter 02 meshes, Lambert pipeline and depth state ready";
-    } else if (options.chapter == Chapter::SunShadows) {
-        title = "TinyWorld ch03 - Sunlight and Shadows";
-        ready = "Chapter 03 meshes, sun depth and world color pipelines ready";
-    } else if (options.chapter == Chapter::Sky) {
-        title = "TinyWorld ch04 - Sky and Environment";
-        ready = "Chapter 04 cubemap, panorama, sun depth and world pipelines ready";
-    } else if (options.chapter == Chapter::Walk) {
-        title = "TinyWorld ch05 - Scene Files and Walking";
-        ready = "Chapter 05 scene and third-person world pipelines ready";
-    } else if (options.chapter == Chapter::Terrain) {
-        title = "TinyWorld ch06 - Heightfield and Robot Walk";
-        ready = "Chapter 06 heightfield chunks and robot ready";
-    } else if (options.chapter == Chapter::Sculpt) {
-        title = "TinyWorld ch07 - Sculpt a Valley";
-        ready = "Chapter 07 sculpting and version 2 scenes ready";
-    } else if (options.chapter == Chapter::Materials) {
-        title = "TinyWorld ch08 - Terrain Materials";
-        ready = "Chapter 08 PBR terrain and material samples ready";
-    } else if (options.chapter == Chapter::Road) {
-        title = "TinyWorld ch09 - Spline Roads";
-        ready = "Chapter 09 spline road and planting mask ready";
-    } else if (options.chapter == Chapter::Props) {
-        title = "TinyWorld ch10 - Place Scene Objects";
-        ready = "Chapter 10 prop placement and transform gizmos ready";
-    } else if (options.chapter == Chapter::Meadow) {
-        title = "TinyWorld ch11 - Grass, Treeline and Instancing";
-        ready = "Chapter 11 grass cards, trees and instancing ready";
-    } else if (options.chapter == Chapter::Ecology) {
-        title = "TinyWorld ch12 - Terrain Ecology";
-        ready = "Chapter 12 seeded terrain vegetation and road exclusion ready";
-    } else if (options.chapter == Chapter::Village) {
-        title = "TinyWorld ch13 - Village Assets and Footbridge";
-        ready = "Chapter 13 glTF meshes, PBR textures and bridge walking ready";
-    } else if (options.chapter == Chapter::Water) {
-        title = "TinyWorld ch14 - Lake, Stream and Shore";
-        ready = "Chapter 14 opaque scene depth and water pipeline ready";
-    } else if (options.chapter == Chapter::Coast) {
-        title = "TinyWorld ch15 - Estuary and Coast";
-        ready = "Chapter 15 coastal terrain, ocean waves and shore route ready";
-    } else if (options.chapter == Chapter::Atmosphere) {
-        title = "TinyWorld ch16 - Sun, Shadows and Distance Fog";
-        ready = "Chapter 16 shared sky color, shadow distance and linear fog ready";
-    } else if (options.chapter == Chapter::Lightmap) {
-        title = "TinyWorld ch17 - Bake a Lightmap";
-        ready = "Chapter 17 CPU-baked porch lightmap and UV2 ready";
-    } else if (options.chapter == Chapter::DayCycle) {
-        title = "TinyWorld ch18 - Day and Night";
-        ready = "Chapter 18 shared day-night sky, reflections and solar shadows ready";
-    }
-    if (options.chapter == Chapter::TerrainVisibility) {
-        title = "TinyWorld ch19 - Terrain LOD and Frustum Culling";
-        ready = "Chapter 19 stitched LOD and camera terrain culling ready";
-    }
-    if (options.chapter == Chapter::TerrainStreaming) {
-        title = "TinyWorld ch20 - Stream Terrain Chunks";
-        ready = "Chapter 20 background terrain, road and plant streaming ready";
-    }
-    if (options.chapter == Chapter::Capstone) {
-        title = "TinyWorld ch21 - Forest to Cape";
-        ready = "Chapter 21 expanded coast tour ready";
-    }
+    const auto [title, ready] = DescribeChapter(options);
     const bool benchmark = options.benchmarkVegetation || options.benchmarkTerrain ||
                            options.benchmarkStreaming || options.benchmarkCapstone;
     Window window(title, options.capturePath.empty() && !benchmark);

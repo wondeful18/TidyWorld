@@ -1,4 +1,5 @@
 #include "Engine/Terrain/HeightField.h"
+#include "Engine/Terrain/ChunkCache.h"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -51,8 +52,8 @@ std::size_t TerrainGrid::Index(glm::ivec2 key) const {
 //————————————————————————————————————————————————————————————————————————————————
 glm::ivec2 TerrainGrid::KeyAt(glm::vec2 xz) const {
     xz = glm::clamp(xz, glm::vec2{-HalfExtent()}, glm::vec2{HalfExtent()});
-    return {std::min(static_cast<int>(std::floor(xz.x / kChunkSize)), EndKey() - 1),
-            std::min(static_cast<int>(std::floor(xz.y / kChunkSize)), EndKey() - 1)};
+    return {std::min(static_cast<int>(std::floor(xz.x / ChunkSize())), EndKey() - 1),
+            std::min(static_cast<int>(std::floor(xz.y / ChunkSize())), EndKey() - 1)};
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -69,8 +70,8 @@ HeightField::HeightField(TerrainGrid grid)
     : mGrid(grid), mHeights(grid.SampleSide() * grid.SampleSide()), mChunkRevisions(grid.ChunkCount()) {
     for (int iz = mGrid.FirstSample(); iz <= mGrid.LastSample(); ++iz) {
         for (int ix = mGrid.FirstSample(); ix <= mGrid.LastSample(); ++ix) {
-            const float x = ix * kSpacing;
-            const float z = iz * kSpacing;
+            const float x = ix * mGrid.Spacing();
+            const float z = iz * mGrid.Spacing();
             const float rise = 1.12f * std::sin(-0.23f * z) + 0.18f * std::sin(0.33f * x + 0.18f * z);
             const float west = Hill(x, z, -10.5f, -5.5f, 6.7f, 3.1f);
             const float east = Hill(x, z, 10.0f, -0.5f, 6.2f, 3.5f);
@@ -81,9 +82,45 @@ HeightField::HeightField(TerrainGrid grid)
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 样点表包含块的两端和每端向外一格，局部查询可以读到边缘法线所需的邻居。
+//————————————————————————————————————————————————————————————————————————————————
+HeightField::HeightField(TerrainGrid grid, glm::ivec2 key, Samples halo)
+    : mTile(key), mGrid(grid), mHeights(std::move(halo)), mRevision(NextRevision()) {
+    const auto side = grid.Cells() + 3;
+    if (!grid.Contains(key) || mHeights.size() != static_cast<std::size_t>(side * side)) {
+        throw std::runtime_error("Invalid chunk height halo.");
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 游览布局只有元数据，异步读盘成功的块由 CPU 缓存持有。
+//————————————————————————————————————————————————————————————————————————————————
+HeightField::HeightField(TerrainGrid grid, std::shared_ptr<ChunkCache> cache)
+    : mCache(std::move(cache)), mGrid(grid), mRevision(NextRevision()) {}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 游览时只用目标块内部的四个样点。未驻留时可将玩家脚下的块提升到队首。
+//————————————————————————————————————————————————————————————————————————————————
+std::optional<float> HeightField::TryHeight(glm::vec2 xz, bool request) const {
+    if (!mCache) return HeightAt(xz);
+    const auto key = mGrid.KeyAt(xz);
+    if (const auto tile = mCache->Find(key)) return tile->heights.HeightAt(xz);
+    if (request) mCache->Prioritize(key);
+    return std::nullopt;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 从世界样点编号换算数组里的 X、Z 索引。
 //————————————————————————————————————————————————————————————————————————————————
 float HeightField::Sample(int ix, int iz) const {
+    if (mTile) {
+        const auto local = glm::ivec2{ix, iz} - *mTile * mGrid.Cells() + 1;
+        const int side = mGrid.Cells() + 3;
+        const int x = std::clamp(local.x, 0, side - 1);
+        const int z = std::clamp(local.y, 0, side - 1);
+        return mHeights[z * side + x];
+    }
+    if (mCache) throw std::logic_error("Use TryHeight for cached terrain.");
     const int x = std::clamp(ix, mGrid.FirstSample(), mGrid.LastSample());
     const int z = std::clamp(iz, mGrid.FirstSample(), mGrid.LastSample());
     return mHeights[mGrid.SampleIndex(x, z)];
@@ -93,8 +130,13 @@ float HeightField::Sample(int ix, int iz) const {
 // 先定位单元格，再对斜边两侧的三角形分别做线性插值。
 //————————————————————————————————————————————————————————————————————————————————
 float HeightField::HeightAt(glm::vec2 xz) const {
-    const float sx = std::clamp(xz.x / kSpacing, static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
-    const float sz = std::clamp(xz.y / kSpacing, static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
+    if (mCache) {
+        const auto height = TryHeight(xz);
+        if (!height) throw std::logic_error("Terrain chunk has not loaded.");
+        return *height;
+    }
+    const float sx = std::clamp(xz.x / mGrid.Spacing(), static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
+    const float sz = std::clamp(xz.y / mGrid.Spacing(), static_cast<float>(mGrid.FirstSample()), static_cast<float>(mGrid.LastSample()));
     const int ix = std::min(static_cast<int>(std::floor(sx)), mGrid.LastSample() - 1);
     const int iz = std::min(static_cast<int>(std::floor(sz)), mGrid.LastSample() - 1);
     const float fx = sx - ix;
@@ -121,12 +163,13 @@ glm::ivec2 HeightField::ChunkAt(glm::vec2 xz) {
 // 先取得圆的样点包围盒，再按距离给实际修改赋权。平滑始终读取修改前的高度。
 //————————————————————————————————————————————————————————————————————————————————
 bool HeightField::ApplyBrush(glm::vec2 center, const TerrainBrush& brush, float seconds) {
+    if (mCache || mTile) return false;
     if (brush.radius <= 0.0f || seconds <= 0.0f || brush.strength <= 0.0f) {
         return false;
     }
-    const auto low = glm::ivec2(glm::clamp(glm::floor((center - brush.radius) / kSpacing),
+    const auto low = glm::ivec2(glm::clamp(glm::floor((center - brush.radius) / mGrid.Spacing()),
                                            glm::vec2{static_cast<float>(mGrid.FirstSample())}, glm::vec2{static_cast<float>(mGrid.LastSample())}));
-    const auto high = glm::ivec2(glm::clamp(glm::ceil((center + brush.radius) / kSpacing),
+    const auto high = glm::ivec2(glm::clamp(glm::ceil((center + brush.radius) / mGrid.Spacing()),
                                             glm::vec2{static_cast<float>(mGrid.FirstSample())}, glm::vec2{static_cast<float>(mGrid.LastSample())}));
     const auto before = mHeights;
     glm::ivec2 changedLow{mGrid.LastSample()};
@@ -137,7 +180,7 @@ bool HeightField::ApplyBrush(glm::vec2 center, const TerrainBrush& brush, float 
     };
     for (int z = low.y; z <= high.y; ++z) {
         for (int x = low.x; x <= high.x; ++x) {
-            const auto delta = glm::vec2{x * kSpacing, z * kSpacing} - center;
+            const auto delta = glm::vec2{x * mGrid.Spacing(), z * mGrid.Spacing()} - center;
             const float t = std::max(0.0f, 1.0f - glm::length(delta) / brush.radius);
             const float weight = t * t * (3.0f - 2.0f * t);
             if (weight == 0.0f) {
@@ -182,9 +225,10 @@ bool HeightField::ApplyBrush(glm::vec2 center, const TerrainBrush& brush, float 
 // 用与绘制一致的两个平面分别求射线交点，再检查点是否落在该半个方格内。
 //————————————————————————————————————————————————————————————————————————————————
 bool HeightField::Raycast(glm::vec3 origin, glm::vec3 direction, glm::vec3& hit) const {
+    if (mCache || mTile) return false;
     float nearest = std::numeric_limits<float>::infinity();
-    const auto gridOrigin = glm::vec2{origin.x, origin.z} / kSpacing;
-    const auto dxz = glm::vec2{direction.x, direction.z} / kSpacing;
+    const auto gridOrigin = glm::vec2{origin.x, origin.z} / mGrid.Spacing();
+    const auto dxz = glm::vec2{direction.x, direction.z} / mGrid.Spacing();
     for (int z = mGrid.FirstSample(); z < mGrid.LastSample(); ++z) {
         for (int x = mGrid.FirstSample(); x < mGrid.LastSample(); ++x) {
             const auto oxz = gridOrigin - glm::vec2{x, z};
@@ -243,8 +287,8 @@ void HeightField::Invalidate(glm::ivec2 low, glm::ivec2 high) {
     std::size_t index = 0;
     for (int z = mGrid.FirstKey(); z < mGrid.EndKey(); ++z) {
         for (int x = mGrid.FirstKey(); x < mGrid.EndKey(); ++x, ++index) {
-            const glm::ivec2 start = glm::ivec2{x, z} * kCellsPerChunk;
-            const glm::ivec2 end = start + kCellsPerChunk;
+            const glm::ivec2 start = glm::ivec2{x, z} * mGrid.Cells();
+            const glm::ivec2 end = start + mGrid.Cells();
             if (start.x <= high.x && end.x >= low.x && start.y <= high.y && end.y >= low.y) {
                 mChunkRevisions[index] = mRevision;
             }

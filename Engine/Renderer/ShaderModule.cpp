@@ -31,9 +31,10 @@ std::string ReadWgsl(const std::filesystem::path& path) {
 // 将共用类型和函数放在当前 WGSL 入口之前，再统一验证一次模块。
 //————————————————————————————————————————————————————————————————————————————————
 ShaderHandle LoadWgslModule(WebGpuContext& gpu, const std::filesystem::path& path,
-                           const std::filesystem::path& preamble) {
-    std::string code = ReadWgsl(path);
-    if (!preamble.empty()) code = ReadWgsl(preamble) + '\n' + code;
+                           std::initializer_list<std::filesystem::path> includes) {
+    std::string code;
+    for (const auto& include : includes) code += ReadWgsl(path.parent_path() / include) + '\n';
+    code += ReadWgsl(path);
     WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
     wgsl.code = {code.data(), code.size()};
     const auto label = path.filename().string();

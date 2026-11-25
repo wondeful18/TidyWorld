@@ -1,4 +1,5 @@
 #include "Engine/Scene/WorldScene.h"
+#include "Engine/Terrain/ChunkCache.h"
 
 #include <glm/trigonometric.hpp>
 
@@ -158,35 +159,6 @@ void WorldScene::UpdateGroundedObjects(const HeightField& previous) {
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 只有进入漫游时才初始化小车，退出后恢复使用编辑器相机。
-//————————————————————————————————————————————————————————————————————————————————
-void WorldScene::SetDriving(bool active) {
-    if (active && !mCar && !terrain) {
-        SetWalking(false);
-        auto& body = objects[kCarIndex].transform;
-        if (spawn) {
-            mParkedCar = body;
-        }
-        mCar.emplace(body, environment ? 8.0f : 24.0f, mParkedCar.value_or(RoamingCar::kDefaultStart));
-    } else if (!active) {
-        mCar.reset();
-        if (mParkedCar) {
-            objects[kCarIndex].transform = *mParkedCar;
-            mParkedCar.reset();
-        }
-    }
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 漫游开启时把控制器结果写到与渲染器共享的车身变换。
-//————————————————————————————————————————————————————————————————————————————————
-void WorldScene::UpdateDrive(CarInput input, float deltaSeconds) {
-    if (mCar) {
-        mCar->Update(objects[kCarIndex].transform, input, deltaSeconds);
-    }
-}
-
-//————————————————————————————————————————————————————————————————————————————————
 // 两种游览共用视口输入，同一时刻只启用一种控制器。
 //————————————————————————————————————————————————————————————————————————————————
 void WorldScene::SetWalking(bool active) {
@@ -206,7 +178,23 @@ void WorldScene::SetWalking(bool active) {
 //————————————————————————————————————————————————————————————————————————————————
 void WorldScene::UpdateWalk(WalkInput input, double deltaSeconds) {
     if (mWalker) {
-        mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain(), props);
+        if (storage) {
+            const auto grid = terrain->Grid();
+            const auto p = input.reset ? spawn->groundXZ : glm::vec2{mWalker->Pose().position.x, mWalker->Pose().position.z};
+            const auto low = grid.KeyAt(p - kBridgeDeckHalfLength);
+            const auto high = grid.KeyAt(p + kBridgeDeckHalfLength);
+            std::vector<PlacedProp> bridges;
+            for (int z = low.y; z <= high.y; ++z) {
+                for (int x = low.x; x <= high.x; ++x) {
+                    if (const auto tile = storage->cache->Find({x, z})) {
+                        for (const auto& prop : tile->props) if (prop.asset == kBridgeAsset) bridges.push_back(prop);
+                    }
+                }
+            }
+            mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain(), bridges);
+        } else {
+            mWalker->Update(*spawn, objects[kGroundIndex].transform, input, deltaSeconds, Terrain(), props);
+        }
     }
 }
 

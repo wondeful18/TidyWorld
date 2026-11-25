@@ -13,7 +13,7 @@ class WorldEditor;
 //————————————————————————————————————————————————————————————————————————————————
 class SceneViewport {
 public:
-    static constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;  // 保存 SDR 显示颜色的格式
+    static constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8UnormSrgb;  // 保存 SDR 显示颜色的格式
 
     //————————————————————————————————————————————————————————————————————————————————
     // 测量面板空间并提交图片控件。
@@ -44,6 +44,7 @@ private:
     void Resize(WGPUDevice device, PixelSize size);
 
     TextureHandle mTexture;       // 可渲染且可采样的场景纹理
+    TextureViewHandle mDisplayView;  // ImGui 读取已经编码的显示字节
     TextureViewHandle mView;      // 提供给渲染通道和 ImGui 的视图
     PixelSize mSize{};            // 已分配离屏纹理的像素尺寸
     bool mVisible{};              // 本帧已经向 ImGui 提交图片

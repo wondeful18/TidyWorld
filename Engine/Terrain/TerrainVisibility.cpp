@@ -24,8 +24,9 @@ std::size_t TerrainIndex(glm::ivec2 key) {
 // 同时扫描边缘样点，避免把轮廓或接缝排除在包围盒之外。
 //————————————————————————————————————————————————————————————————————————————————
 TerrainBounds MeasureTerrainBounds(const HeightField& field, glm::ivec2 key) {
-    const auto start = key * HeightField::kCellsPerChunk;
-    const auto end = start + HeightField::kCellsPerChunk;
+    const auto grid = field.Grid();
+    const auto start = key * grid.Cells();
+    const auto end = start + grid.Cells();
     float low = field.Sample(start.x, start.y);
     float high = low;
     for (int z = start.y; z <= end.y; ++z) {
@@ -35,8 +36,8 @@ TerrainBounds MeasureTerrainBounds(const HeightField& field, glm::ivec2 key) {
             high = std::max(high, y);
         }
     }
-    return {{start.x * HeightField::kSpacing, low, start.y * HeightField::kSpacing},
-            {end.x * HeightField::kSpacing, high, end.y * HeightField::kSpacing}};
+    return {{start.x * grid.Spacing(), low, start.y * grid.Spacing()},
+            {end.x * grid.Spacing(), high, end.y * grid.Spacing()}};
 }
 
 //————————————————————————————————————————————————————————————————————————————————

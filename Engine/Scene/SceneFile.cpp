@@ -3,6 +3,8 @@
 #include "Engine/Scene/DayCycle.h"
 
 #include "Engine/Scene/WorldScene.h"
+#include "Engine/Terrain/ChunkCache.h"
+#include "Engine/Terrain/WorldChunkPacking.h"
 
 #include <nlohmann/json.hpp>
 
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -130,7 +133,7 @@ void ReadHeightField(const Json& data, HeightField& field) {
 //————————————————————————————————————————————————————————————————————————————————
 // 只编码影响下次打开的编辑状态，游览控制器只是临时状态。
 //————————————————————————————————————————————————————————————————————————————————
-Json Encode(const WorldScene& scene) {
+Json Encode(const WorldScene& scene, bool metadata = false, const RoadSpline* packedRoad = nullptr) {
     Json objects = Json::array();
     for (const auto& object : scene.objects) {
         const auto& t = object.transform;
@@ -161,30 +164,31 @@ Json Encode(const WorldScene& scene) {
                          {"car_reflection", sky.carReflection}}},
     };
     if (scene.dayCycle) doc["time_hours"] = WrapDayHour(scene.dayCycle->hour);
-    if (scene.terrain) {
+    if (scene.terrain && !metadata) {
         doc["heightfield"] = {{"spacing_m", HeightField::kSpacing},
                               {"samples_per_axis", scene.terrain->Grid().SampleSide()},
                               {"heights_m", scene.terrain->Values()}};
     }
-    if (scene.road) {
+    const auto* road = packedRoad ? packedRoad : scene.road ? &*scene.road : nullptr;
+    if (road) {
         Json points = Json::array();
         Json offsets = Json::array();
         bool hasOffsets = false;
-        for (const auto& point : scene.road->points) {
+        for (const auto& point : road->points) {
             points.push_back({point.x, point.z});
             offsets.push_back(point.y);
             hasOffsets |= point.y != 0.0f;
         }
-        doc["road"] = {{"control_xz", std::move(points)}, {"width_m", scene.road->width}, {"margin_m", scene.road->margin}};
+        doc["road"] = {{"control_xz", std::move(points)}, {"width_m", road->width}, {"margin_m", road->margin}};
         if (hasOffsets) {
             doc["road"]["control_y_offset_m"] = std::move(offsets);
         }
-        doc["road"]["surface"] = static_cast<int>(scene.road->surface);
-        doc["road"]["junction"] = static_cast<int>(scene.road->junction);
-        doc["road"]["junction_point"] = scene.road->junctionPoint;
-        doc["road"]["branch_length_m"] = scene.road->branchLength;
+        doc["road"]["surface"] = static_cast<int>(road->surface);
+        doc["road"]["junction"] = static_cast<int>(road->junction);
+        doc["road"]["junction_point"] = road->junctionPoint;
+        doc["road"]["branch_length_m"] = road->branchLength;
     }
-    if (scene.paint && scene.paint->Revision() != 0) {
+    if (!metadata && scene.paint && scene.paint->Revision() != 0) {
         constexpr std::string_view hex = "0123456789abcdef";
         std::string bytes;
         bytes.reserve(MaterialSplat::kSide * MaterialSplat::kSide * 8);
@@ -198,7 +202,7 @@ Json Encode(const WorldScene& scene) {
     }
     if (scene.canPlaceProps) {
         auto& props = doc["props"] = Json::array();
-        for (const auto& prop : scene.props) {
+        if (!metadata) for (const auto& prop : scene.props) {
             const auto& t = prop.transform;
             props.push_back({{"asset", kPropAssets.at(prop.asset).id}, {"position", WriteVec3(t.position)},
                              {"rotation_deg", WriteVec3(t.rotationDegrees)}, {"scale", WriteVec3(t.scale)}});
@@ -239,7 +243,7 @@ void ReadObjects(const Json& entries, WorldScene& scene) {
 //————————————————————————————————————————————————————————————————————————————————
 // 在局部场景中读取文件内容，成功后交由调用者提交。
 //————————————————————————————————————————————————————————————————————————————————
-WorldScene Decode(const Json& doc) {
+WorldScene Decode(const Json& doc, std::shared_ptr<ChunkCache> cache = {}, TerrainGrid packagedGrid = TerrainGrid{}) {
     const auto& version = doc.at("version");
     if (!version.is_number_integer() || version < kSceneVersion || version > kCapstoneVersion) {
         throw std::runtime_error("Unsupported scene file version.");
@@ -251,7 +255,11 @@ WorldScene Decode(const Json& doc) {
         scene.dayCycle.emplace().hour = WrapDayHour(ReadNumber(doc.at("time_hours"), 0.0f, 24.0f));
     }
     if (terrain) {
-        ReadHeightField(doc.at("heightfield"), scene.terrain.emplace(TerrainGrid{version == kCapstoneVersion}));
+        if (cache) {
+            scene.terrain.emplace(packagedGrid, std::move(cache));
+        } else {
+            ReadHeightField(doc.at("heightfield"), scene.terrain.emplace(TerrainGrid{version == kCapstoneVersion}));
+        }
         scene.canSculpt = true;
     }
     if (version.get<int>() >= kRoadVersion) {
@@ -431,12 +439,33 @@ void WriteAtomically(const std::filesystem::path& path, std::string_view data) {
     std::filesystem::remove(staging, cleanup);
 }
 
+//————————————————————————————————————————————————————————————————————————————————
+// 替换过的块才在清单中列出版本。版本只能是写入器生成的目录名。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<std::string> ReadChunkVersions(const Json& manifest, TerrainGrid grid) {
+    std::vector<std::string> result(grid.ChunkCount());
+    if (!manifest.contains("chunk_versions")) return result;
+    for (const auto& entry : manifest.at("chunk_versions")) {
+        RequireArray(entry, 2);
+        const auto index = entry.at(0).get<std::size_t>();
+        auto version = entry.at(1).get<std::string>();
+        if (index >= result.size() || !result[index].empty() || !version.starts_with("update.saving-") ||
+            version.find_first_not_of("0123456789-", std::string_view("update.saving-").size()) != std::string::npos ||
+            version.size() > 80) {
+            throw std::runtime_error("Invalid world chunk version entry.");
+        }
+        result[index] = std::move(version);
+    }
+    return result;
+}
+
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
 // 保存前用同一套规则校验，确保写出的状态能重开。
 //————————————————————————————————————————————————————————————————————————————————
 void SaveScene(const std::filesystem::path& path, const WorldScene& scene) {
+    if (scene.storage) throw std::runtime_error("Open an authoring JSON scene to edit and update a world package.");
     if (scene.terrain && !scene.canSculpt) {
         throw std::runtime_error("Terrain files open in the sculpting chapters.");
     }
@@ -452,12 +481,31 @@ void SaveScene(const std::filesystem::path& path, const WorldScene& scene) {
 // 单次赋值才修改编辑器与渲染器共享的场景，读取失败时保留原地址和数据。
 //————————————————————————————————————————————————————————————————————————————————
 void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("Cannot open scene file.");
+    const bool packaged = std::filesystem::is_directory(path);
+    std::ifstream input(packaged ? path / "manifest.json" : path, std::ios::binary);
+    if (!input) throw std::runtime_error("Cannot open scene file.");
+    const auto doc = Json::parse(input);
+    WorldScene loaded;
+    if (packaged) {
+        if (!scene.streamTerrain || doc.at("format") != "TWWorld" || doc.at("version") != 1) {
+            throw std::runtime_error("World packages require Chapter 20 or later and a TWWorld v1 manifest.");
+        }
+        const auto layout = doc.at("layout").get<std::string>();
+        TerrainGrid grid;
+        if (layout == "exploration") grid = TerrainGrid::Exploration();
+        else if (layout == "expanded") grid = TerrainGrid(true);
+        else if (layout != "sample") throw std::runtime_error("Unknown world chunk layout.");
+        if (doc.at("chunk_count") != grid.ChunkCount() || doc.at("chunk_size_m") != grid.ChunkSize() ||
+            doc.at("cells_per_chunk") != grid.Cells()) throw std::runtime_error("World manifest layout mismatch.");
+        auto cache = std::make_shared<ChunkCache>(grid, ReadChunkVersions(doc, grid));
+        loaded = Decode(doc.at("scene"), cache, grid);
+        if (!loaded.terrain) throw std::runtime_error("World package has no terrain.");
+        loaded.storage = WorldStorage{path, std::move(cache)};
+    } else {
+        loaded = Decode(doc);
     }
-    auto loaded = Decode(Json::parse(input));
-    if (loaded.terrain.has_value() != scene.terrain.has_value() || (loaded.terrain && !scene.canSculpt)) {
+    if (loaded.terrain.has_value() != scene.terrain.has_value() ||
+        (loaded.terrain && !scene.canSculpt && !scene.storage)) {
         throw std::runtime_error("Choose a scene version that matches this chapter.");
     }
     if (loaded.road && !scene.road) {
@@ -478,18 +526,18 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
     }
     if (!loaded.dayCycle) loaded.dayCycle = scene.dayCycle;
     loaded.canUseGltfProps = scene.canUseGltfProps;
-    if (scene.road && !loaded.road) {
+    if (scene.road && !loaded.road && !packaged) {
         loaded.road.emplace();
     }
-    if (loaded.paint && !scene.paint) {
+    if (loaded.paint && !scene.materials) {
         throw std::runtime_error("Painted terrain scenes open in Chapter 08 or later.");
     }
-    if (scene.paint && !loaded.paint) {
+    if (scene.materials && !loaded.paint && !packaged) {
         loaded.paint.emplace();
     }
     loaded.showChunkBorders = scene.showChunkBorders;
     loaded.terrainPreview = scene.terrainPreview;
-    if (loaded.terrain && loaded.terrain->Grid() == TerrainGrid(true) && !scene.capstone) {
+    if (loaded.terrain && loaded.terrain->Grid() != TerrainGrid{} && !scene.capstone) {
         throw std::runtime_error("The expanded terrain opens in Chapter 21.");
     }
     loaded.capstone = scene.capstone;
@@ -506,7 +554,106 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
         loaded.vegetation->visible = scene.vegetation->visible;
         loaded.vegetation->instanced = scene.vegetation->instanced;
     }
+    if (packaged) {
+        loaded.canSculpt = false;
+        loaded.showChunkBorders = false;
+        if (loaded.atmosphere && doc.contains("atmosphere")) {
+            const auto& air = doc.at("atmosphere");
+            loaded.atmosphere->fogEnabled = air.at("fog_enabled").get<bool>();
+            loaded.atmosphere->fogStart = ReadNumber(air.at("fog_start_m"), 0.0f, 500.0f);
+            loaded.atmosphere->fogDensity = ReadNumber(air.at("fog_density"), 0.0f, 1.0f);
+            loaded.atmosphere->shadowDistance = ReadNumber(air.at("shadow_distance_m"), 0.0f, 500.0f);
+        }
+    }
     scene = std::move(loaded);
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 逐块比较编码字节，未变的块不替换。先写块，最后发布可打开的清单。
+//————————————————————————————————————————————————————————————————————————————————
+void SaveWorldPackage(const std::filesystem::path& directory, const WorldScene& scene, bool exploration,
+                      bool compress) {
+    if (!scene.terrain || scene.storage || !scene.spawn || scene.IsDriving() || scene.IsWalking()) {
+        throw std::runtime_error("Stop previewing and use an authoring terrain scene to save a world package.");
+    }
+    const WorldChunkPacking pack(scene, exploration);
+    const auto grid = pack.Grid();
+    const auto layout = grid == TerrainGrid::Exploration() ? "exploration"
+        : grid == TerrainGrid(true) ? "expanded" : "sample";
+    const auto manifestPath = directory / "manifest.json";
+    std::optional<Json> previousManifest;
+    if (std::ifstream previous(manifestPath); previous) {
+        previousManifest = Json::parse(previous);
+        if (previousManifest->at("layout") != layout) {
+            throw std::runtime_error("Choose a new world directory when changing the chunk layout.");
+        }
+    }
+    auto versions = previousManifest ? ReadChunkVersions(*previousManifest, grid)
+                                     : std::vector<std::string>(grid.ChunkCount());
+    const ChunkCache snapshot(grid, versions);
+    std::filesystem::create_directories(directory / "chunks");
+    std::filesystem::path update;
+    try {
+        for (std::size_t index = 0; index < grid.ChunkCount(); ++index) {
+            const auto key = grid.Key(index);
+            const auto previousPath = snapshot.File(directory, key);
+            const auto bytes = EncodeChunk(pack.MakeTile(key), key, compress);
+            if (std::ifstream previous(previousPath, std::ios::binary); previous) {
+                const std::string old{std::istreambuf_iterator<char>(previous), {}};
+                if (old == bytes) continue;
+            }
+            auto path = ChunkPath(directory, key);
+            if (previousManifest) {
+                if (update.empty()) {
+                    const auto parent = directory / "chunks" / "updates";
+                    std::filesystem::create_directories(parent);
+                    update = CreateStagingDirectory(parent / "update");
+                }
+                path = update / path.filename();
+                versions[index] = update.filename().string();
+            }
+            WriteAtomically(path, bytes);
+        }
+        Json manifest{{"format", "TWWorld"}, {"version", 1}, {"layout", layout},
+                      {"chunk_count", grid.ChunkCount()}, {"chunk_size_m", grid.ChunkSize()},
+                      {"cells_per_chunk", grid.Cells()}, {"scene", Encode(scene, true, pack.Road() ? &*pack.Road() : nullptr)}};
+        manifest["chunk_versions"] = Json::array();
+        for (std::size_t index = 0; index < versions.size(); ++index) {
+            if (!versions[index].empty()) manifest["chunk_versions"].push_back({index, versions[index]});
+        }
+        if (scene.atmosphere || exploration) {
+            auto air = scene.atmosphere.value_or(AtmosphereSettings{});
+            if (exploration) {
+                const AtmosphereSettings sample;
+                if (air.fogStart == sample.fogStart) air.fogStart = 125.0f;
+                if (air.fogDensity == sample.fogDensity) air.fogDensity = 0.012f;
+                if (air.shadowDistance == sample.shadowDistance) air.shadowDistance = 350.0f;
+            }
+            manifest["atmosphere"] = {{"fog_enabled", air.fogEnabled}, {"fog_start_m", air.fogStart},
+                                      {"fog_density", air.fogDensity}, {"shadow_distance_m", air.shadowDistance}};
+        }
+        if (!previousManifest || *previousManifest != manifest) WriteAtomically(manifestPath, manifest.dump(2) + '\n');
+    } catch (...) {
+        if (!update.empty()) {
+            std::error_code cleanup;
+            for (const auto& file : std::filesystem::directory_iterator(update, cleanup)) {
+                std::filesystem::remove(file.path(), cleanup);
+            }
+            std::filesystem::remove(update, cleanup);
+        }
+        throw;
+    }
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// CLI 打包复用编辑器的场景验证与块编码。
+//————————————————————————————————————————————————————————————————————————————————
+void PackWorldFile(const std::filesystem::path& source, const std::filesystem::path& directory,
+                   bool exploration, bool compress) {
+    std::ifstream input(source, std::ios::binary);
+    if (!input) throw std::runtime_error("Cannot open authoring JSON.");
+    auto scene = Decode(Json::parse(input));
+    SaveWorldPackage(directory, scene, exploration, compress);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -514,11 +661,10 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene) {
 //————————————————————————————————————————————————————————————————————————————————
 void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road, TerrainGrid grid) {
     const auto mask = MakeRoadMask(road, grid);
-    const auto side = std::to_string(mask.Side());
-    const auto min = std::to_string(-grid.HalfExtent());
+    const auto origin = std::to_string(mask.origin.x) + "," + std::to_string(mask.origin.y);
     const auto spacing = std::to_string(RoadMask::kSpacing);
-    std::string data = "P5\n# TinyWorld world_xz_min=" + min + "," + min +
-        " pixel_spacing_m=" + spacing + "\n" + side + " " + side + "\n255\n";
+    std::string data = "P5\n# TinyWorld world_xz_min=" + origin +
+        " pixel_spacing_m=" + spacing + "\n" + std::to_string(mask.size.x) + " " + std::to_string(mask.size.y) + "\n255\n";
     data.append(reinterpret_cast<const char*>(mask.pixels.data()), mask.pixels.size());
     WriteAtomically(path, data);
 }

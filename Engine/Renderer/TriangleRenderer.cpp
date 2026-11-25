@@ -52,7 +52,12 @@ PipelineHandle CreatePipeline(WebGpuContext& gpu, WGPUTextureFormat format,
     target.format = format;
     WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
     fragment.module = shader.get();
-    fragment.entryPoint = {srgb ? "fsLinear" : "fsDisplay", WGPU_STRLEN};
+    WGPUConstantEntry encoding = WGPU_CONSTANT_ENTRY_INIT;
+    encoding.key = {"targetIsSrgb", WGPU_STRLEN};
+    encoding.value = srgb ? 1.0 : 0.0;
+    fragment.entryPoint = {"fsMain", WGPU_STRLEN};
+    fragment.constantCount = 1;
+    fragment.constants = &encoding;
     fragment.targetCount = 1;
     fragment.targets = &target;
 

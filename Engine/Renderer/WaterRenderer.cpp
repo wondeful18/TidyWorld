@@ -11,6 +11,7 @@
 #include <glm/matrix.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
@@ -25,6 +26,7 @@ namespace {
 struct WaterUniform {
     glm::mat4 viewProjection;     // 世界坐标到 WebGPU 裁剪坐标
     glm::mat4 inverseViewProjection;  // 除以重建后的 W 即得世界坐标
+    glm::vec4 renderOffset;       // 地图坐标到光栅化坐标的平移，米
     glm::vec4 cameraAndTime;      // 相机 XYZ 与流水周期的弧度相位
     glm::vec4 controls;           // 依次为深度观察、反射开关、海岸开关和填充
     glm::vec4 horizon;            // 与天空共用的远海线性颜色，w 保留
@@ -32,7 +34,7 @@ struct WaterUniform {
     glm::vec4 lighting;           // x 控制环境亮度，y 为共享夜景比例          // 与场景物体共用的距离雾
 };
 
-static_assert(sizeof(WaterUniform) == 224);
+static_assert(sizeof(WaterUniform) == 240);
 
 //————————————————————————————————————————————————————————————————————————————————
 // 用同一条水带从溪谷经过湖泊。海岸模式把东端逐渐扩宽到整片海面。
@@ -74,7 +76,7 @@ std::vector<glm::vec3> MakeWaterMesh(bool coast, float limit) {
             const glm::vec3 a{x0, y, z0}, b{x0, y, z1}, c{x1, y, z0}, d{x1, y, z1};
             vertices.insert(vertices.end(), {a, b, c, c, b, d});
         };
-        constexpr float edge = WaterSettings::kCoastFar + 70.0f;
+        const float edge = std::max(WaterSettings::kCoastFar + 70.0f, limit + 64.0f);
         const float side = limit;
         constexpr float join = WaterSettings::kCoastEnd;
         addRectangle(join, edge, -edge, edge);
@@ -104,10 +106,10 @@ BufferHandle MakeWaterBuffer(WGPUDevice device, WGPUBufferUsage usage, std::size
 WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const EnvironmentMap& environment,
                              const std::filesystem::path& shaderPath, bool coast)
     : mGpu(gpu), mEnvironment(environment) {
-    const auto shader = LoadWgslModule(gpu, shaderPath, shaderPath.parent_path() / "fog.wgsl");
-    std::array<WGPUBindGroupLayoutEntry, 2> entries{
+    const auto shader = LoadWgslModule(gpu, shaderPath, {"output_color.wgsl", "fog.wgsl"});
+    std::array<WGPUBindGroupLayoutEntry, 2> entries{{
         WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-    };
+    }};
     entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
     entries[0].buffer.type = WGPUBufferBindingType_Uniform;
     entries[0].buffer.minBindingSize = sizeof(WaterUniform);
@@ -136,7 +138,10 @@ WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const
     color.blend = &blend;
     WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
     fragment.module = shader.get();
-    fragment.entryPoint = {IsSrgbFormat(format) ? "fsWaterLinear" : "fsWaterDisplay", WGPU_STRLEN};
+    fragment.entryPoint = {"fsWater", WGPU_STRLEN};
+    const auto encoding = UnormEncoding(format);
+    fragment.constantCount = 1;
+    fragment.constants = &encoding;
     fragment.targetCount = 1;
     fragment.targets = &color;
 
@@ -181,10 +186,10 @@ void WaterRenderer::SyncExtent(bool coast, float halfExtent) {
 // Load 保留不透明颜色。深度只作纹理绑定，窗口缩放后改用新的视图。
 //————————————————————————————————————————————————————————————————————————————————
 void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, WGPUTextureView depthView,
-                           const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
+                           const glm::mat4& viewProjection, glm::vec3 renderOffset, glm::vec3 camera, const WaterSettings& settings,
                            glm::vec3 horizon, const FrameAtmosphere& air, glm::vec4 lighting) {
     if (depthView != mBoundDepth) {
-        std::array<WGPUBindGroupEntry, 2> entries{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+        std::array<WGPUBindGroupEntry, 2> entries{{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
         entries[0].buffer = mUniform.get();
         entries[0].size = sizeof(WaterUniform);
         entries[1].binding = 1;
@@ -198,7 +203,7 @@ void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, W
         mBoundDepth = depthView;
     }
     const float phase = settings.seconds * (glm::two_pi<float>() / WaterSettings::kLoopSeconds);
-    const WaterUniform values{viewProjection, glm::inverse(viewProjection), glm::vec4(camera, phase),
+    const WaterUniform values{viewProjection, glm::inverse(viewProjection), glm::vec4(renderOffset, 0.0f), glm::vec4(camera, phase),
                              {settings.view == WaterView::Depth ? 1.0f : 0.0f,
                               settings.view == WaterView::NoReflection ? 0.0f : 1.0f,
                               settings.coast ? 1.0f : 0.0f, 0.0f}, glm::vec4(horizon, 0.0f), air, lighting};

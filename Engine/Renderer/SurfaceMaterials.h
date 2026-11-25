@@ -4,6 +4,8 @@
 #include "Engine/Scene/SceneMesh.h"
 #include "Engine/Terrain/MaterialSplat.h"
 
+#include <span>
+
 namespace tinyworld {
 
 class WebGpuContext;
@@ -35,7 +37,13 @@ public:
     //————————————————————————————————————————————————————————————————————————————————
     void SyncPaint(WGPUQueue queue, const MaterialSplat& paint);
 
+    //————————————————————————————————————————————————————————————————————————————————
+    // 上传独立的权重切片，并沿用同一套颜色、粗糙度与采样器。
+    //————————————————————————————————————————————————————————————————————————————————
+    BindGroupHandle UploadTile(WebGpuContext& gpu, std::span<const MaterialSplat::Pixel> pixels, std::uint32_t side) const;
+
 private:
+    BindGroupHandle BindWeights(WGPUDevice device, WGPUTextureView weights) const;
     TextureHandle mBaseColor;      // sRGB 底色数组
     TextureHandle mRoughness;      // 线性粗糙度数组
     TextureHandle mWeightTexture;  // 线性二维 RGBA 权重

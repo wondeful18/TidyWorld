@@ -14,6 +14,7 @@
 #include <fstream>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <string_view>
 
 namespace tinyworld {
@@ -153,7 +154,9 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
     GltfPrimitive result;
     result.material = source.material ? static_cast<std::size_t>(source.material - model.materials) : model.materials_count;
     result.hasLightmapUv = bakeUv != nullptr;
-    result.vertices.reserve(count);
+    result.vertices.reserve(std::min(count, position->count));
+    result.indices.reserve(count);
+    std::unordered_map<std::size_t, std::uint32_t> remap;
     for (std::size_t i = 0; i < count; ++i) {
         // 镜像节点翻转绕序，背面剔除仍与法线一致。
         std::size_t corner = i;
@@ -162,6 +165,9 @@ GltfPrimitive ReadPrimitive(const cgltf_primitive& source, const cgltf_data& mod
             if (i % 3 == 2) --corner;
         }
         const auto index = source.indices ? cgltf_accessor_read_index(source.indices, corner) : corner;
+        const auto [entry, inserted] = remap.try_emplace(index, static_cast<std::uint32_t>(result.vertices.size()));
+        result.indices.push_back(entry->second);
+        if (!inserted) continue;
         glm::vec3 p{}, n{};
         glm::vec2 texcoord{0.0f}, chart{0.0f};
         if (index >= position->count || !cgltf_accessor_read_float(position, index, glm::value_ptr(p), 3) ||

@@ -18,19 +18,13 @@ fn vsMain(@location(0) position: vec2<f32>, @location(1) color: vec3<f32>) -> Ve
 }
 
 //————————————————————————————————————————————————————————————————————————————————
-// 把插值 RGB 写入保存显示值的 8 位 Unorm 目标。
+// 插值颜色使用显示值。写入 sRGB 附件之前转换成线性颜色。
 //————————————————————————————————————————————————————————————————————————————————
-@fragment
-fn fsDisplay(input: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(input.color, 1.0);
-}
+override targetIsSrgb: bool = false;
 
-//————————————————————————————————————————————————————————————————————————————————
-// 为只能选择 sRGB 颜色格式的直接呈现目标准备线性颜色。
-// 目标纹理写入时执行硬件 sRGB 编码。
-//————————————————————————————————————————————————————————————————————————————————
 @fragment
-fn fsLinear(input: VertexOutput) -> @location(0) vec4<f32> {
+fn fsMain(input: VertexOutput) -> @location(0) vec4<f32> {
+    if !targetIsSrgb { return vec4<f32>(input.color, 1.0); }
     let srgb = input.color;
     let linear = select(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3<f32>(2.4)), srgb > vec3<f32>(0.04045));
     return vec4<f32>(linear, 1.0);

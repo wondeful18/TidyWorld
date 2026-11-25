@@ -41,10 +41,11 @@ struct GltfVertex {
 };
 
 //————————————————————————————————————————————————————————————————————————————————
-// 一个三角形列表只引用一种材质，节点局部变换已合并到顶点。
+// 一组有索引三角形只引用一种材质，节点局部变换已合并到顶点。
 //————————————————————————————————————————————————————————————————————————————————
 struct GltfPrimitive {
-    std::vector<GltfVertex> vertices;  // 展开的索引三角形
+    std::vector<GltfVertex> vertices;  // 每个引用到的访问器顶点只保存一次
+    std::vector<std::uint32_t> indices; // 按绘制顺序排列的三角形顶点索引
     std::size_t material{};             // 对应资产内的材质索引
     bool hasLightmapUv{};              // 是否含有 TEXCOORD_1
 };

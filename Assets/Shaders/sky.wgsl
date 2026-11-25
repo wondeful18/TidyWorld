@@ -67,21 +67,7 @@ fn sampleSky(direction: vec3<f32>) -> vec4<f32> {
     return sampled;
 }
 
-//————————————————————————————————————————————————————————————————————————————————
-// sRGB 目标自动编码，天空着色器只返回线性采样结果。
-//————————————————————————————————————————————————————————————————————————————————
 @fragment
-fn fsSkyLinear(input: SkyOutput) -> @location(0) vec4<f32> {
-    return sampleSky(normalize(input.direction));
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 普通 Unorm 目标需要将线性采样值编码一次。
-//————————————————————————————————————————————————————————————————————————————————
-@fragment
-fn fsSkyDisplay(input: SkyOutput) -> @location(0) vec4<f32> {
-    let linear = sampleSky(normalize(input.direction)).rgb;
-    let encoded = select(12.92 * linear, 1.055 * pow(linear, vec3<f32>(1.0 / 2.4)) - 0.055,
-                         linear > vec3<f32>(0.0031308));
-    return vec4<f32>(encoded, 1.0);
+fn fsSky(input: SkyOutput) -> @location(0) vec4<f32> {
+    return outputColor(sampleSky(normalize(input.direction)));
 }

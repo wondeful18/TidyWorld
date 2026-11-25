@@ -14,9 +14,10 @@ namespace {
 // 高度和法线都从全局样点表读取，共边顶点在相邻块中有相同的光照结果。
 //————————————————————————————————————————————————————————————————————————————————
 SceneVertex Vertex(const HeightField& field, int ix, int iz, bool paintTrail) {
-    constexpr float span = 2.0f * HeightField::kSpacing;
-    const float x = ix * HeightField::kSpacing;
-    const float z = iz * HeightField::kSpacing;
+    const float spacing = field.Grid().Spacing();
+    const float span = 2.0f * spacing;
+    const float x = ix * spacing;
+    const float z = iz * spacing;
     const float y = field.Sample(ix, iz);
     const auto n = glm::normalize(glm::vec3{field.Sample(ix - 1, iz) - field.Sample(ix + 1, iz), span,
                                            field.Sample(ix, iz - 1) - field.Sample(ix, iz + 1)});
@@ -41,48 +42,66 @@ SceneVertex BorderVertex(const HeightField& field, glm::vec2 xz) {
 }  // namespace
 
 //————————————————————————————————————————————————————————————————————————————————
-// 每格用 B-C 作为对角线，三角形从上方观察呈逆时针。
+// 每个块只上传一份规则网格顶点，两档 LOD 均引用相同顶点。
 //————————————————————————————————————————————————————————————————————————————————
-std::vector<SceneVertex> MakeTerrainChunk(const HeightField& field, glm::ivec2 key, bool paintTrail, bool coarse) {
-    constexpr int side = HeightField::kCellsPerChunk;
+std::vector<SceneVertex> MakeTerrainVertices(const HeightField& field, glm::ivec2 key, bool paintTrail) {
+    const int side = field.Grid().Cells();
     const glm::ivec2 origin = key * side;
-    std::array<SceneVertex, (side + 1) * (side + 1)> samples;
+    std::vector<SceneVertex> vertices;
+    vertices.reserve((side + 1) * (side + 1));
     for (int z = 0; z <= side; ++z) {
         for (int x = 0; x <= side; ++x) {
-            samples[z * (side + 1) + x] = Vertex(field, origin.x + x, origin.y + z, paintTrail);
+            vertices.push_back(Vertex(field, origin.x + x, origin.y + z, paintTrail));
         }
     }
-    std::vector<SceneVertex> mesh;
-    mesh.reserve(side * side * 6);
-    const int step = coarse ? 2 : 1;
+    return vertices;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 每格以 B-C 为对角线。粗档边缘保留全部共边样点，供相邻块拼接。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<std::uint16_t> MakeTerrainIndices(int side, int step) {
+    const int stride = side + 1;
+    std::vector<std::uint16_t> indices;
     for (int z = 0; z < side; z += step) {
         for (int x = 0; x < side; x += step) {
-            const int i = z * (side + 1) + x;
-            const auto& a = samples[i];
-            const auto& b = samples[i + step];
-            const auto& c = samples[i + step * (side + 1)];
-            const auto& d = samples[i + step * (side + 2)];
-            if (!coarse || (x != 0 && z != 0 && x + step != side && z + step != side)) {
-                mesh.insert(mesh.end(), {a, c, b, b, c, d});
+            const auto a = static_cast<std::uint16_t>(z * stride + x);
+            const auto b = static_cast<std::uint16_t>(a + step);
+            const auto c = static_cast<std::uint16_t>(a + step * stride);
+            const auto d = static_cast<std::uint16_t>(c + step);
+            if (step == 1 || (x != 0 && z != 0 && x + step != side && z + step != side)) {
+                indices.insert(indices.end(), {a, c, b, b, c, d});
                 continue;
             }
-            // 粗格只在块外围插入半米中点，以中心扇形与所有邻块共边。
-            const auto& middle = samples[i + side + 2];
-            const SceneVertex* previous = &a;
-            const auto emit = [&](const SceneVertex& next) {
-                mesh.insert(mesh.end(), {middle, *previous, next});
-                previous = &next;
+            const auto middle = static_cast<std::uint16_t>(a + (step / 2) * (stride + 1));
+            auto previous = a;
+            const auto emit = [&](int index) {
+                const auto next = static_cast<std::uint16_t>(index);
+                indices.insert(indices.end(), {middle, previous, next});
+                previous = next;
             };
-            if (x == 0) emit(samples[i + side + 1]);
+            if (x == 0) for (int j = 1; j < step; ++j) emit(a + j * stride);
             emit(c);
-            if (z + step == side) emit(samples[i + 2 * (side + 1) + 1]);
+            if (z + step == side) for (int j = 1; j < step; ++j) emit(c + j);
             emit(d);
-            if (x + step == side) emit(samples[i + side + 3]);
+            if (x + step == side) for (int j = step - 1; j > 0; --j) emit(b + j * stride);
             emit(b);
-            if (z == 0) emit(samples[i + 1]);
+            if (z == 0) for (int j = step - 1; j > 0; --j) emit(a + j);
             emit(a);
         }
     }
+    return indices;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 教学诊断需要展开三角形时，复用渲染器使用的同一张索引表。
+//————————————————————————————————————————————————————————————————————————————————
+std::vector<SceneVertex> MakeTerrainChunk(const HeightField& field, glm::ivec2 key, bool paintTrail, bool coarse) {
+    const auto vertices = MakeTerrainVertices(field, key, paintTrail);
+    const auto indices = MakeTerrainIndices(field.Grid().Cells(), coarse ? 2 : 1);
+    std::vector<SceneVertex> mesh;
+    mesh.reserve(indices.size());
+    for (const auto index : indices) mesh.push_back(vertices[index]);
     return mesh;
 }
 
@@ -103,10 +122,10 @@ std::vector<SceneVertex> MakeChunkBorders(const HeightField& field) {
     constexpr float halfWidth = 0.045f;
     const auto grid = field.Grid();
     for (int key = grid.FirstKey() + 1; key < grid.EndKey(); ++key) {
-        const float edge = key * HeightField::kChunkSize;
+        const float edge = key * grid.ChunkSize();
         for (int i = grid.FirstSample(); i < grid.LastSample(); ++i) {
-            const float low = i * HeightField::kSpacing;
-            const float high = low + HeightField::kSpacing;
+            const float low = i * grid.Spacing();
+            const float high = low + grid.Spacing();
             const auto a = BorderVertex(field, {edge - halfWidth, low});
             const auto b = BorderVertex(field, {edge + halfWidth, low});
             const auto c = BorderVertex(field, {edge - halfWidth, high});

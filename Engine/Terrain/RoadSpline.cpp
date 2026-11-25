@@ -62,7 +62,7 @@ Polygon Clip(const Polygon& input, glm::vec2 normal, float offset) {
 //————————————————————————————————————————————————————————————————————————————————
 SceneVertex RoadVertex(const HeightField& field, glm::vec3 point, glm::vec2 offsetSlope) {
     const auto p = Xz(point);
-    constexpr float d = HeightField::kSpacing * 0.5f;
+    const float d = field.Grid().Spacing() * 0.5f;
     const float dx = field.HeightAt({p.x - d, p.y}) - field.HeightAt({p.x + d, p.y});
     const float dz = field.HeightAt({p.x, p.y - d}) - field.HeightAt({p.x, p.y + d});
     const auto normal = glm::normalize(glm::vec3{dx - 2.0f * d * offsetSlope.x, 2.0f * d,
@@ -97,18 +97,18 @@ void ClipToTerrain(std::vector<SceneVertex>& mesh, const HeightField& field,
     const auto normal = glm::cross(b - a, c - a);
     if (std::abs(normal.y) <= 1.0e-8f) return;
     const auto offsetSlope = -Xz(normal) / normal.y;
-    const auto first = glm::ivec2(glm::floor(glm::min(Xz(a), glm::min(Xz(b), Xz(c))) / HeightField::kSpacing));
-    const auto last = glm::ivec2(glm::floor(glm::max(Xz(a), glm::max(Xz(b), Xz(c))) / HeightField::kSpacing));
     const auto grid = field.Grid();
+    const auto first = glm::ivec2(glm::floor(glm::min(Xz(a), glm::min(Xz(b), Xz(c))) / grid.Spacing()));
+    const auto last = glm::ivec2(glm::floor(glm::max(Xz(a), glm::max(Xz(b), Xz(c))) / grid.Spacing()));
     for (int z = std::max(first.y, grid.FirstSample()); z <= std::min(last.y, grid.LastSample() - 1); ++z) {
         for (int x = std::max(first.x, grid.FirstSample()); x <= std::min(last.x, grid.LastSample() - 1); ++x) {
-            const float left = x * HeightField::kSpacing;
-            const float bottom = z * HeightField::kSpacing;
-            const float diagonal = left + bottom + HeightField::kSpacing;
+            const float left = x * grid.Spacing();
+            const float bottom = z * grid.Spacing();
+            const float diagonal = left + bottom + grid.Spacing();
             auto cell = Clip(road, {1, 0}, -left);
-            cell = Clip(cell, {-1, 0}, left + HeightField::kSpacing);
+            cell = Clip(cell, {-1, 0}, left + grid.Spacing());
             cell = Clip(cell, {0, 1}, -bottom);
-            cell = Clip(cell, {0, -1}, bottom + HeightField::kSpacing);
+            cell = Clip(cell, {0, -1}, bottom + grid.Spacing());
             AppendPolygon(mesh, field, Clip(cell, {-1, -1}, diagonal), offsetSlope);
             AppendPolygon(mesh, field, Clip(cell, {1, 1}, -diagonal), offsetSlope);
         }
@@ -231,28 +231,50 @@ std::vector<SceneVertex> MakeRoadMesh(const HeightField& field, const RoadSpline
 }
 
 //————————————————————————————————————————————————————————————————————————————————
+// 小样区按整个布局输出可视化遮罩。广域布局默认空，由道路范围决定实际存储大小。
+//————————————————————————————————————————————————————————————————————————————————
+RoadMask::RoadMask(TerrainGrid layout)
+    : grid(layout), origin(-layout.HalfExtent()),
+      size(layout == TerrainGrid::Exploration() ? 0 : static_cast<int>(2.0f * layout.HalfExtent() / kSpacing)),
+      pixels(size.x * size.y) {}
+
+//————————————————————————————————————————————————————————————————————————————————
 // 道路和输出遮罩使用同一条中心线，留边也包含道路开头与结尾。
 //————————————————————————————————————————————————————————————————————————————————
 RoadMask MakeRoadMask(const RoadSpline& road, TerrainGrid grid) {
     RoadMask mask(grid);
     const float extent = grid.HalfExtent();
     constexpr float spacing = RoadMask::kSpacing;
-    const int side = mask.Side();
     const float radius = road.width * 0.5f + road.margin;
-    for (const auto& path : {road.Centerline(), road.Branch(extent - 0.5f)}) for (std::size_t i = 1; i < path.size(); ++i) {
+    const std::array paths{road.Centerline(), road.Branch(extent - 0.5f)};
+    if (grid == TerrainGrid::Exploration() && !paths.front().empty()) {
+        auto low = Xz(paths.front().front());
+        auto high = low;
+        for (const auto& path : paths) {
+            for (const auto& point : path) {
+                low = glm::min(low, Xz(point));
+                high = glm::max(high, Xz(point));
+            }
+        }
+        mask.origin = glm::floor(glm::max(low - radius, glm::vec2{-extent}) / spacing) * spacing;
+        const auto end = glm::ceil(glm::min(high + radius, glm::vec2{extent}) / spacing) * spacing;
+        mask.size = glm::ivec2((end - mask.origin) / spacing);
+        mask.pixels.resize(mask.size.x * mask.size.y);
+    }
+    for (const auto& path : paths) for (std::size_t i = 1; i < path.size(); ++i) {
         const auto a = Xz(path[i - 1]);
         const auto b = Xz(path[i]);
         const auto delta = b - a;
         if (glm::dot(delta, delta) < 1.0e-8f) continue;
-        const auto low = (glm::min(a, b) - radius + extent) / spacing;
-        const auto high = (glm::max(a, b) + radius + extent) / spacing;
+        const auto low = (glm::min(a, b) - radius - mask.origin) / spacing;
+        const auto high = (glm::max(a, b) + radius - mask.origin) / spacing;
         for (int z = std::max(0, static_cast<int>(std::floor(low.y)));
-             z <= std::min(side - 1, static_cast<int>(std::floor(high.y))); ++z) {
+             z <= std::min(mask.size.y - 1, static_cast<int>(std::floor(high.y))); ++z) {
             for (int x = std::max(0, static_cast<int>(std::floor(low.x)));
-                 x <= std::min(side - 1, static_cast<int>(std::floor(high.x))); ++x) {
-                const auto p = (glm::vec2{x, z} + 0.5f) * spacing - extent;
+                 x <= std::min(mask.size.x - 1, static_cast<int>(std::floor(high.x))); ++x) {
+                const auto p = (glm::vec2{x, z} + 0.5f) * spacing + mask.origin;
                 if (DistanceSquared(p, a, b) <= radius * radius) {
-                    mask.pixels[z * side + x] = 255;
+                    mask.pixels[z * mask.size.x + x] = 255;
                 }
             }
         }
@@ -265,16 +287,14 @@ RoadMask MakeRoadMask(const RoadSpline& road, TerrainGrid grid) {
 //————————————————————————————————————————————————————————————————————————————————
 bool RoadMask::Blocks(glm::vec2 xz, float radius) const {
     const float extent = grid.HalfExtent();
-    constexpr float spacing = kSpacing;
-    const int side = Side();
-    const auto low = glm::ivec2(glm::floor((xz + extent - radius) / spacing));
-    const auto high = glm::ivec2(glm::floor((xz + extent + radius) / spacing));
-    if (low.x < 0 || low.y < 0 || high.x >= side || high.y >= side) return true;
-    for (int z = low.y; z <= high.y; ++z) {
-        for (int x = low.x; x <= high.x; ++x) {
-            if (pixels[z * side + x] == 0) continue;
-            const auto corner = glm::vec2{x, z} * spacing - extent;
-            const auto offset = xz - glm::clamp(xz, corner, corner + spacing);
+    if (glm::any(glm::greaterThanEqual(glm::abs(xz) + radius, glm::vec2{extent}))) return true;
+    const auto low = glm::ivec2(glm::floor((xz - origin - radius) / kSpacing));
+    const auto high = glm::ivec2(glm::floor((xz - origin + radius) / kSpacing));
+    for (int z = std::max(0, low.y); z <= std::min(size.y - 1, high.y); ++z) {
+        for (int x = std::max(0, low.x); x <= std::min(size.x - 1, high.x); ++x) {
+            if (pixels[z * size.x + x] == 0) continue;
+            const auto corner = glm::vec2{x, z} * kSpacing + origin;
+            const auto offset = xz - glm::clamp(xz, corner, corner + kSpacing);
             if (glm::dot(offset, offset) <= radius * radius) return true;
         }
     }

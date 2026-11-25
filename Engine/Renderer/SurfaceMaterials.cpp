@@ -188,6 +188,14 @@ SurfaceMaterials::SurfaceMaterials(WebGpuContext& gpu, const std::filesystem::pa
     if (!mLayout || !mSampler || !mColorView || !mRoughView || !mWeightView) {
         throw std::runtime_error("Cannot initialize terrain material resources.");
     }
+    mBinding = BindWeights(gpu.Device(), mWeightView.get());
+    gpu.CheckValidation("surface material textures");
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 旧章节全图权重与磁盘切片共享前三个槽，第四个槽指向当前权重纹理。
+ //————————————————————————————————————————————————————————————————————————————————
+BindGroupHandle SurfaceMaterials::BindWeights(WGPUDevice device, WGPUTextureView weights) const {
     std::array<WGPUBindGroupEntry, 4> bindings{};
     for (std::uint32_t i = 0; i < bindings.size(); ++i) {
         bindings[i] = WGPU_BIND_GROUP_ENTRY_INIT;
@@ -196,16 +204,35 @@ SurfaceMaterials::SurfaceMaterials(WebGpuContext& gpu, const std::filesystem::pa
     bindings[0].textureView = mColorView.get();
     bindings[1].textureView = mRoughView.get();
     bindings[2].sampler = mSampler.get();
-    bindings[3].textureView = mWeightView.get();
+    bindings[3].textureView = weights;
     WGPUBindGroupDescriptor binding = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
     binding.layout = mLayout.get();
     binding.entryCount = bindings.size();
     binding.entries = bindings.data();
-    mBinding.reset(wgpuDeviceCreateBindGroup(gpu.Device(), &binding));
-    gpu.CheckValidation("surface material textures");
-    if (!mBinding) {
-        throw std::runtime_error("Cannot bind surface materials.");
-    }
+    BindGroupHandle result(wgpuDeviceCreateBindGroup(device, &binding));
+    if (!result) throw std::runtime_error("Cannot bind surface materials.");
+    return result;
+}
+
+//————————————————————————————————————————————————————————————————————————————————
+// 权重纹理与视图由返回的绑定组保活，逐出时一起释放。
+//————————————————————————————————————————————————————————————————————————————————
+BindGroupHandle SurfaceMaterials::UploadTile(WebGpuContext& gpu, std::span<const MaterialSplat::Pixel> pixels,
+                                            std::uint32_t side) const {
+    WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    descriptor.size = {side, side, 1};
+    descriptor.format = WGPUTextureFormat_RGBA8Unorm;
+    descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    TextureHandle texture(wgpuDeviceCreateTexture(gpu.Device(), &descriptor));
+    TextureViewHandle view(texture ? wgpuTextureCreateView(texture.get(), nullptr) : nullptr);
+    if (!view) throw std::runtime_error("Cannot create terrain weight tile.");
+    WGPUTexelCopyTextureInfo target = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    target.texture = texture.get();
+    WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+    layout.bytesPerRow = side * sizeof(MaterialSplat::Pixel);
+    layout.rowsPerImage = side;
+    wgpuQueueWriteTexture(gpu.Queue(), &target, pixels.data(), pixels.size_bytes(), &layout, &descriptor.size);
+    return BindWeights(gpu.Device(), view.get());
 }
 
 //————————————————————————————————————————————————————————————————————————————————

@@ -119,6 +119,7 @@ private:
     const unsigned* mSceneDraws;               // 阴影、颜色与水面通道的实际调用数
     const TerrainDrawStats* mTerrainStats;       // 上一帧地形统计
     std::optional<std::size_t> mSelected{2};   // 物体索引，kObjectCount 表示出生点，空值表示太阳
+    bool mPackExploration{};  // 打包时生成 1024 米布局
     std::array<char, 4096> mScenePath{};       // ImGui 编辑的 UTF-8 文件路径
     std::string mSceneStatus;                 // 最近一次保存或重开的结果
     GizmoMode mGizmoMode{GizmoMode::Move};

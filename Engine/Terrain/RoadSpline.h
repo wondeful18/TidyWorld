@@ -50,10 +50,11 @@ struct RoadSpline {
 //————————————————————————————————————————————————————————————————————————————————
 struct RoadMask {
     static constexpr float kSpacing = 0.25f;
-    explicit RoadMask(TerrainGrid layout = TerrainGrid{})
-        : grid(layout), pixels(Side() * Side()) {}
-    [[nodiscard]] int Side() const { return static_cast<int>(2.0f * grid.HalfExtent() / kSpacing); }
-    TerrainGrid grid;
+    explicit RoadMask(TerrainGrid layout = TerrainGrid{});
+    [[nodiscard]] int Side() const { return size.x; }
+    TerrainGrid grid;   // 世界边界，供查询控制地图边缘
+    glm::vec2 origin;   // 第一个像素的左下角，地图 XZ，米
+    glm::ivec2 size;    // 行宽与行数；大地图只栅格化围住道路的一块矩形
     std::vector<std::uint8_t> pixels;  // 0 可种植，255 避让
     [[nodiscard]] bool Blocks(glm::vec2 xz, float radius = 0.0f) const;
 };

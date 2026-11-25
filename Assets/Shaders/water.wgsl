@@ -4,6 +4,7 @@
 struct WaterUniform {
     viewProjection: mat4x4<f32>,         // 绘制平面使用的相机投影
     inverseViewProjection: mat4x4<f32>,  // 从采样深度重建世界位置
+    renderOffset: vec4<f32>,            // 光栅化用的原点平移
     cameraAndTime: vec4<f32>,            // 观察位置与流动弧度相位
     controls: vec4<f32>,                 // 深度观察、反射开关、海岸开关与填充
     horizon: vec4<f32>,                  // 与天空共用的远海线性颜色
@@ -30,7 +31,7 @@ struct WaterVertex {
 //————————————————————————————————————————————————————————————————————————————————
 @vertex
 fn vsWater(@location(0) position: vec3<f32>) -> WaterVertex {
-    return WaterVertex(water.viewProjection * vec4<f32>(position, 1.0), position);
+    return WaterVertex(water.viewProjection * vec4<f32>(position + water.renderOffset.xyz, 1.0), position);
 }
 
 //————————————————————————————————————————————————————————————————————————————————
@@ -49,7 +50,7 @@ fn shadeWater(input: WaterVertex) -> vec4<f32> {
     // WebGPU 深度已经是 0–1，像素 Y 向下，裁剪空间 Y 向上。
     let ndc = input.position.xy / vec2<f32>(dimensions) * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
     let bottom = water.inverseViewProjection * vec4<f32>(ndc, sceneDepth, 1.0);
-    let depthM = select(clamp(input.world.y - bottom.y / bottom.w, 0.0, 4.0), 4.0,
+    let depthM = select(clamp(input.world.y - (bottom.y / bottom.w - water.renderOffset.y), 0.0, 4.0), 4.0,
                         sceneDepth >= 0.999999);
     if (water.controls.x > 0.5) {
         let shade = clamp(depthM / 2.0, 0.0, 1.0);
@@ -111,21 +112,7 @@ fn shadeWater(input: WaterVertex) -> vec4<f32> {
     return vec4<f32>(applyDistanceFog(color, distanceToEye, water.air), alpha);
 }
 
-//————————————————————————————————————————————————————————————————————————————————
-// sRGB 附件使用线性源颜色进行混合。
-//————————————————————————————————————————————————————————————————————————————————
 @fragment
-fn fsWaterLinear(input: WaterVertex) -> @location(0) vec4<f32> {
-    return shadeWater(input);
-}
-
-//————————————————————————————————————————————————————————————————————————————————
-// 编辑器的普通 Unorm 附件保存已编码的显示值，与不透明颜色使用同一约定。
-//————————————————————————————————————————————————————————————————————————————————
-@fragment
-fn fsWaterDisplay(input: WaterVertex) -> @location(0) vec4<f32> {
-    let linear = shadeWater(input);
-    let encoded = select(12.92 * linear.rgb, 1.055 * pow(linear.rgb, vec3<f32>(1.0 / 2.4)) - 0.055,
-                         linear.rgb > vec3<f32>(0.0031308));
-    return vec4<f32>(encoded, linear.a);
+fn fsWater(input: WaterVertex) -> @location(0) vec4<f32> {
+    return outputColor(shadeWater(input));
 }

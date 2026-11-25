@@ -78,6 +78,7 @@ private:
     void Follow(const Transform& ground, const HeightField* terrain);
 
     WalkSpawn mFeet;        // 当前脚底 XZ 和朝向，与出生点采用同一坐标空间
+    bool mWaitingForGround{}; // 出生块未就绪时尚未确定脚底高度
     double mRemaining{};   // 尚未凑满一个时间步的秒数
     float mFeetHeight{};   // 地形场景的步进脚底 Y，单位为米
     Transform mPose;        // 供渲染器使用的世界脚底变换

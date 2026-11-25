@@ -33,7 +33,7 @@ glm::vec3 Forward(float yaw) {
 //————————————————————————————————————————————————————————————————————————————————
 float WalkSurfaceHeight(const HeightField& terrain, glm::vec2 xz, std::span<const PlacedProp> props,
                         float maxDeckHeight = std::numeric_limits<float>::infinity()) {
-    float height = terrain.HeightAt(xz);
+    float height = terrain.TryHeight(xz).value_or(0.0f);
     for (const auto& prop : props) {
         if (prop.asset != kBridgeAsset) continue;
         const auto model = prop.transform.Matrix();
@@ -76,6 +76,7 @@ Transform WalkSpawn::WorldPose(const Transform& ground, const HeightField* terra
 WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, const HeightField* terrain,
                                std::span<const PlacedProp> props)
     : mFeet(spawn), mFeetHeight(terrain ? WalkSurfaceHeight(*terrain, spawn.groundXZ, props) : 0.0f) {
+    mWaitingForGround = terrain && !terrain->TryHeight(spawn.groundXZ, true);
     mCamera.distance = 4.3f;
     mCamera.elevation = 9.0f;
     Follow(ground, terrain);
@@ -87,10 +88,19 @@ WalkController::WalkController(const WalkSpawn& spawn, const Transform& ground, 
 void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, WalkInput input,
                             double deltaSeconds, const HeightField* terrain, std::span<const PlacedProp> props) {
     if (input.reset) {
+        if (terrain && !terrain->TryHeight(spawn.groundXZ, true)) return;
         *this = WalkController(spawn, ground, terrain, props);
         return;
     }
 
+    if (terrain && !terrain->TryHeight(mFeet.groundXZ, true)) {
+        mRemaining = 0.0;
+        return;
+    }
+    if (terrain && mWaitingForGround) {
+        mFeetHeight = WalkSurfaceHeight(*terrain, mFeet.groundXZ, props);
+        mWaitingForGround = false;
+    }
     // 窗口恢复后最多补算 0.1 秒，避免把长时间暂停变成一次大跳跃。
     mRemaining += std::clamp(deltaSeconds, 0.0, 0.1);
     const auto groundBasis = terrain ? glm::mat3{1.0f} : glm::mat3(ground.Matrix());
@@ -100,14 +110,20 @@ void WalkController::Update(const WalkSpawn& spawn, const Transform& ground, Wal
     const float turnDegrees = input.turn * kTurnSpeed * stepSeconds;
     // 允许纳秒量级的舍入误差，避免同一段时间因帧分组少推进一步。
     while (mRemaining + kTimeTolerance >= kStep) {
-        mFeet.yaw = std::remainder(mFeet.yaw + turnDegrees, 360.0f);
-        const glm::vec3 forward = Forward(mFeet.yaw);
+        const float yaw = std::remainder(mFeet.yaw + turnDegrees, 360.0f);
+        const glm::vec3 forward = Forward(yaw);
         const float metersPerUnit = glm::length(groundBasis * forward);
         const float travel = input.forward * kWalkSpeed * stepSeconds / metersPerUnit;
         const auto previous = mFeet.groundXZ;
-        mFeet.groundXZ += glm::vec2(forward.x, forward.z) * travel;
-        mFeet.groundXZ.x = std::clamp(mFeet.groundXZ.x, -limitX, limitX);
-        mFeet.groundXZ.y = std::clamp(mFeet.groundXZ.y, -limitZ, limitZ);
+        const auto next = glm::clamp(previous + glm::vec2(forward.x, forward.z) * travel,
+                                     glm::vec2{-limitX, -limitZ}, glm::vec2{limitX, limitZ});
+        // 目标格未就绪时整步暂停，也不累计掉帧期间的重力或位移。
+        if (terrain && !terrain->TryHeight(next, true)) {
+            mRemaining = 0.0;
+            break;
+        }
+        mFeet.yaw = yaw;
+        mFeet.groundXZ = next;
         if (terrain) {
             // 从沟底靠近桥时，只有可迈上去的桥面才成为新的脚底高度。
             constexpr float maxStepUp = 0.24f;
@@ -142,7 +158,7 @@ void WalkController::Follow(const Transform& ground, const HeightField* terrain)
         mCamera.distance = 4.3f;
         mCamera.elevation = 13.0f;
         const auto eye = mCamera.Position();
-        const float minimumY = terrain->HeightAt({eye.x, eye.z}) + 0.35f;
+        const float minimumY = terrain->TryHeight({eye.x, eye.z}).value_or(eye.y - 0.35f) + 0.35f;
         if (eye.y < minimumY) {
             // 只抬高镜头，保留水平位置，避免从坡下回头时仰角把相机拉进坡面。
             const float horizontal = glm::length(glm::vec2(eye.x - mCamera.target.x, eye.z - mCamera.target.z));

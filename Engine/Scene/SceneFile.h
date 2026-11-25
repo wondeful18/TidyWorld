@@ -25,4 +25,12 @@ void LoadScene(const std::filesystem::path& path, WorldScene& scene);
 void ExportRoadMask(const std::filesystem::path& path, const RoadSpline& road,
                     TerrainGrid grid = TerrainGrid{});
 
+//————————————————————————————————————————————————————————————————————————————————
+// 从旧 JSON 导入离线素材，或者从编辑器源场景更新同布局的包。未变的块保持原文件。
+//————————————————————————————————————————————————————————————————————————————————
+void SaveWorldPackage(const std::filesystem::path& directory, const WorldScene& scene,
+                      bool exploration = false, bool compress = true);
+void PackWorldFile(const std::filesystem::path& source, const std::filesystem::path& directory,
+                   bool exploration, bool compress);
+
 }  // namespace tinyworld

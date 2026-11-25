@@ -6,6 +6,12 @@
 namespace tinyworld {
 
 //————————————————————————————————————————————————————————————————————————————————
+// 顶点按 Z 行排列，LOD 索引由相同布局的所有块共享。
+//————————————————————————————————————————————————————————————————————————————————
+[[nodiscard]] std::vector<SceneVertex> MakeTerrainVertices(const HeightField& field, glm::ivec2 key, bool paintTrail);
+[[nodiscard]] std::vector<std::uint16_t> MakeTerrainIndices(int cells, int step);
+
+//————————————————————————————————————————————————————————————————————————————————
 // 从整数块键生成一块三角形列表，顶点使用世界空间坐标。
 //————————————————————————————————————————————————————————————————————————————————
 [[nodiscard]] std::vector<SceneVertex> MakeTerrainChunk(const HeightField& field, glm::ivec2 key,

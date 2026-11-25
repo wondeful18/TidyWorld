@@ -82,6 +82,25 @@ struct MaterialPreview {
 };
 
 //————————————————————————————————————————————————————————————————————————————————
+// 磁盘包只保留目录与当前运转的 CPU 块缓存。
+//————————————————————————————————————————————————————————————————————————————————
+struct WorldStorage {
+    std::filesystem::path directory;   // 已打开的世界目录
+    std::shared_ptr<ChunkCache> cache;  // 供后台流送与角色高度查询共享
+};
+
+//————————————————————————————————————————————————————————————————————————————————
+// 同一地形放到远离世界原点的位置，比较两种坐标上传方式。
+//————————————————————————————————————————————————————————————————————————————————
+struct PrecisionPreview {
+    static constexpr double kOriginOffset = 100000.0; // 人为加入的世界 XZ 偏移，米
+    bool offsetWorld{};        // 启用偏移测试
+    bool cameraRelative{true}; // 先以双精度减去相机原点
+    float cameraNudge{};       // 同时平移相机与目标的 X，单位为米
+    bool cascades{true};       // 用同机位比较单图与级联阴影
+};
+
+//————————————————————————————————————————————————————————————————————————————————
 // 小屋场景的 CPU 数据。GPU 对象和 ImGui 交互各自由对应模块持有。
 //————————————————————————————————————————————————————————————————————————————————
 struct WorldScene {
@@ -95,6 +114,8 @@ struct WorldScene {
     static constexpr OrbitCamera kPorchCamera{{3.55f, 1.17f, 7.75f}, 24.0f, 22.0f, 9.0f};
     static constexpr OrbitCamera kShoreCamera{{18.4f, -0.55f, -1.8f}, -91.0f, 24.0f, 14.0f};  // 近岸对照机位
     static constexpr std::size_t kGroundIndex = 0;  // 草台是平地步行的参考坐标系
+    static constexpr std::size_t kTreeIndex = 1;  // 固定树作为步行尺度参照
+    static constexpr std::size_t kHouseIndex = 2; // 固定小屋也可用作摆件原型
     static constexpr std::size_t kCarIndex = 3;  // 小车排在三件常驻物体后面
     static constexpr std::size_t kObjectCount = kCarIndex + 1;  // 包含小车的最大物体数
     std::array<WorldObject, kObjectCount> objects{{
@@ -108,8 +129,10 @@ struct WorldScene {
     std::optional<ShadowSettings> shadows;  // 仅在支持太阳阴影的章节中设置
     std::optional<EnvironmentSettings> environment;  // 仅在有天空演示的章节中设置
     std::optional<WalkSpawn> spawn;  // 第五章的步行入口，支持持久化
+    std::optional<WorldStorage> storage;  // 磁盘块来源，JSON 样区保持空值
     std::optional<HeightField> terrain;  // 第六章的全局高度样点
     bool showChunkBorders{};  // 是否在颜色通道叠画地形的内部边界
+    PrecisionPreview precision;  // 结业编辑器的坐标与阴影对照
     bool capstone{};                     // 第 21 章允许加载较大的场景布局
     bool streamTerrain{};                 // 第二十章分块准备地形和植被实例
     std::optional<TerrainPreview> terrainPreview; // 第十九章的独立 LOD 和视锥开关

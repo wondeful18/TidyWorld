@@ -144,8 +144,9 @@ GltfImage BakePorch(const GltfAsset& asset) {
                 throw std::runtime_error("Lightmap UV lies outside [0, 1].");
             }
         }
-        for (std::size_t i = 0; i < primitive.vertices.size(); i += 3) {
-            triangles.push_back({primitive.vertices[i], primitive.vertices[i + 1], primitive.vertices[i + 2]});
+        for (std::size_t i = 0; i < primitive.indices.size(); i += 3) {
+            triangles.push_back({primitive.vertices[primitive.indices[i]], primitive.vertices[primitive.indices[i + 1]],
+                                 primitive.vertices[primitive.indices[i + 2]]});
         }
     }
     std::vector<Texel> atlas(kSide * kSide);

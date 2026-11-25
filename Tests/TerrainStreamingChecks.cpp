@@ -39,17 +39,17 @@ void CheckStreaming() {
     const glm::ivec2 far{2, -2};
     stream.Update(start, field, road, plants);
     const auto first = Get(stream);
-    Require(TerrainKey(first.index) == start && first.fine.size() == 1536 && first.coarse.size() == 648,
+    Require(TerrainKey(first.index) == start && first.vertices.size() == (TerrainGrid::kCells + 1) * (TerrainGrid::kCells + 1),
             "The nearest key must be delivered with both meshes first.");
-    const auto firstHeights = first.fine;
+    const auto firstHeights = first.vertices;
     stream.Update(far, field, road, plants);
     Require(!stream.Wants(first.index), "A distant key was not evicted.");
     stream.Update(start, field, road, plants);
     const auto returned = Get(stream);
     Require(returned.index == first.index && returned.plants == first.plants &&
-            returned.fine.size() == firstHeights.size(), "Return did not reproduce the old tile.");
-    for (std::size_t i = 0; i < returned.fine.size(); ++i) {
-        Require(returned.fine[i].position == firstHeights[i].position, "Return yielded a different height.");
+            returned.vertices.size() == firstHeights.size(), "Return did not reproduce the old tile.");
+    for (std::size_t i = 0; i < returned.vertices.size(); ++i) {
+        Require(returned.vertices[i].position == firstHeights[i].position, "Return yielded a different height.");
     }
 
     stream.Update(far, field, road, plants);

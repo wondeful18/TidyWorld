@@ -91,7 +91,7 @@ VegetationPatch GenerateVegetationChunk(const HeightField& field, const RoadMask
     for (std::size_t kind = 0; kind < instances.size(); ++kind) {
         if (!terrainRules && static_cast<VegetationKind>(kind) == VegetationKind::Rock) continue;
         const int cells = cellsPerAxis[kind];
-        const float spacing = HeightField::kChunkSize / cells;
+        const float spacing = field.Grid().ChunkSize() / cells;
         const auto stream = static_cast<std::uint32_t>(8 * kind + 2);
         const auto species = static_cast<VegetationKind>(kind);
         for (int z = 0; z < cells; ++z) {
@@ -104,7 +104,7 @@ VegetationPatch GenerateVegetationChunk(const HeightField& field, const RoadMask
                     y < *settings.minPlantHeight) continue;
                 float chance;
                 if (terrainRules) {
-                    constexpr float d = HeightField::kSpacing;
+                    const float d = field.Grid().Spacing();
                     const glm::vec2 east{d, 0.0f}, north{0.0f, d};
                     const auto gradient = glm::vec2{field.HeightAt(xz + east) - field.HeightAt(xz - east),
                                                    field.HeightAt(xz + north) - field.HeightAt(xz - north)} / (2.0f * d);

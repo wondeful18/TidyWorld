@@ -14,7 +14,7 @@ namespace {
 // 第九章已把路面裁进半米格。用三角形重心可以无缝分派到块键。
 //————————————————————————————————————————————————————————————————————————————————
 auto SplitRoad(const HeightField& field, const std::optional<RoadSpline>& road) {
-    std::array<std::vector<SceneVertex>, TerrainGrid::kMaxChunkCount> chunks;
+    std::vector<std::vector<SceneVertex>> chunks(field.Grid().ChunkCount());
     if (!road) return chunks;
     const auto mesh = MakeRoadMesh(field, *road);
     const auto grid = field.Grid();
@@ -40,29 +40,47 @@ ChunkStreamer::ChunkStreamer() : mWorker([this](std::stop_token stop) { Run(stop
 // 视点改变时取消旧需求，场景源改变时所有旧结果都需要重新生成。
 //————————————————————————————————————————————————————————————————————————————————
 void ChunkStreamer::Update(glm::ivec2 focus, const HeightField& heights, const std::optional<RoadSpline>& road,
-                           const VegetationSettings& plants) {
+                           const VegetationSettings& plants, const std::filesystem::path& directory,
+                           std::shared_ptr<ChunkCache> cache) {
     const std::lock_guard lock(mMutex);
     const bool changed = !mSource || mSource->heights.Revision() != heights.Revision() ||
-                         mSource->road != road || mSource->plants.mode != plants.mode ||
+                         mSource->directory != directory || mSource->cache != cache || mSource->road != road || mSource->plants.mode != plants.mode ||
                          mSource->plants.seed != plants.seed || mSource->plants.density != plants.density ||
                          mSource->plants.minPlantHeight != plants.minPlantHeight;
-    if (!changed && focus == mFocus) return;
+    const auto urgent = cache ? cache->TakePriority() : std::nullopt;
+    if (!changed && focus == mFocus && !urgent && !mUrgent) return;
+    mUrgent = urgent;
     const auto grid = heights.Grid();
-    if (!mSource || mSource->heights.Grid() != grid) mSlots = {};
-    if (changed) mSource = std::make_shared<const Source>(Source{heights, road, plants});
+    if (!mSource || mSource->heights.Grid() != grid) {
+        mSlots.clear();
+        mSlots.resize(grid.ChunkCount());
+    }
+    if (changed) {
+        mSource = std::make_shared<const Source>(Source{heights, road, plants, directory, std::move(cache)});
+        mFailure = nullptr;
+    }
     mFocus = focus;
     mPriority.clear();
+    const int radius = grid == TerrainGrid::Exploration() ? 10 : kRadius;
     for (std::size_t index = 0; index < grid.ChunkCount(); ++index) {
         const auto delta = grid.Key(index) - focus;
         auto& slot = mSlots[index];
-        if (std::max(std::abs(delta.x), std::abs(delta.y)) > kRadius) {
+        const bool priority = urgent && grid.Key(index) == *urgent;
+        if (!priority && std::max(std::abs(delta.x), std::abs(delta.y)) > radius) {
             slot = {};
             continue;
         }
-        if (changed || slot.state == State::Empty) slot = {State::Queued, std::nullopt};
+        if (changed || slot.state == State::Empty || (priority && slot.state == State::Delivered)) {
+            slot = {State::Queued, std::nullopt, ++mTicket};
+        }
         mPriority.push_back(index);
     }
-    std::stable_sort(mPriority.begin(), mPriority.end(), [focus, grid](std::size_t a, std::size_t b) {
+    std::stable_sort(mPriority.begin(), mPriority.end(), [focus, grid, urgent](std::size_t a, std::size_t b) {
+        if (urgent) {
+            const bool aFirst = grid.Key(a) == *urgent;
+            const bool bFirst = grid.Key(b) == *urgent;
+            if (aFirst != bFirst) return aFirst;
+        }
         const auto distance = [focus, grid](std::size_t index) {
             const auto d = grid.Key(index) - focus;
             return d.x * d.x + d.y * d.y;
@@ -88,43 +106,67 @@ std::optional<std::size_t> ChunkStreamer::FirstWithState(State state) const {
 void ChunkStreamer::Run(std::stop_token stop) {
     std::shared_ptr<const Source> lastSource;
     RoadMask mask;
-    std::array<std::vector<SceneVertex>, TerrainGrid::kMaxChunkCount> roadChunks;
-    try {
-        while (!stop.stop_requested()) {
-            std::shared_ptr<const Source> source;
-            std::size_t index{};
-            {
-                std::unique_lock lock(mMutex);
-                if (!mChanged.wait(lock, stop, [&] { return FirstWithState(State::Queued).has_value(); })) return;
-                if (stop.stop_requested()) return;
-                index = *FirstWithState(State::Queued);
-                mSlots[index].state = State::Working;
-                source = mSource;
-            }
+    std::vector<std::vector<SceneVertex>> roadChunks;
+    while (!stop.stop_requested()) {
+        std::shared_ptr<const Source> source;
+        std::size_t index{};
+        std::uint64_t ticket{};
+        {
+            std::unique_lock lock(mMutex);
+            if (!mChanged.wait(lock, stop, [&] {
+                constexpr auto readyLimit = 8;
+                const auto ready = std::count_if(mPriority.begin(), mPriority.end(),
+                    [&](std::size_t item) { return mSlots[item].state == State::Ready; });
+                const bool urgentQueued = mUrgent &&
+                    mSlots[mSource->heights.Grid().Index(*mUrgent)].state == State::Queued;
+                return !mFailure && (ready < readyLimit || urgentQueued) &&
+                       FirstWithState(State::Queued).has_value();
+            })) return;
+            if (stop.stop_requested()) return;
+            index = *FirstWithState(State::Queued);
+            mSlots[index].state = State::Working;
+            source = mSource;
+            ticket = mSlots[index].ticket;
+        }
+        try {
+            const auto grid = source->heights.Grid();
             if (source != lastSource) {
-                mask = source->road ? MakeRoadMask(*source->road, source->heights.Grid()) : RoadMask(source->heights.Grid());
-                roadChunks = SplitRoad(source->heights, source->road);
+                mask = source->road ? MakeRoadMask(*source->road, grid) : RoadMask(grid);
+                if (!source->cache) roadChunks = SplitRoad(source->heights, source->road);
                 lastSource = source;
             }
-            const auto& heights = source->heights;
-            const auto key = heights.Grid().Key(index);
-            const bool paintTrail = !source->road;
-            ChunkPayload result{index, MeasureTerrainBounds(heights, key),
-                                MakeTerrainChunk(heights, key, paintTrail),
-                                MakeTerrainChunk(heights, key, paintTrail, true),
-                                GenerateVegetationChunk(heights, mask, key, source->plants), roadChunks[index]};
-            {
-                const std::lock_guard lock(mMutex);
-                auto& slot = mSlots[index];
-                if (mSource == source && slot.state == State::Working) {
-                    slot = {State::Ready, std::move(result)};
+            const auto key = grid.Key(index);
+            ChunkPayload result;
+            result.index = index;
+            if (source->cache) {
+                result.tile = source->cache->Find(key);
+                result.cacheHit = static_cast<bool>(result.tile);
+                if (!result.tile) {
+                    result.tile = std::make_shared<const ChunkTile>(
+                        ReadChunk(source->cache->File(source->directory, key), grid, key, result.io));
+                    source->cache->Store(key, result.tile);
                 }
             }
-            mChanged.notify_all();
+            const auto start = std::chrono::steady_clock::now();
+            const auto& heights = result.tile ? result.tile->heights : source->heights;
+            result.bounds = MeasureTerrainBounds(heights, key);
+            result.vertices = MakeTerrainVertices(heights, key, !source->road);
+            result.plants = GenerateVegetationChunk(heights, mask, key, source->plants);
+            if (!result.tile) result.road = roadChunks[index];
+            result.meshMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            {
+                const std::lock_guard lock(mMutex);
+                if (mSource == source) {
+                    auto& slot = mSlots[index];
+                    if (slot.state == State::Working && slot.ticket == ticket) {
+                        slot = {State::Ready, std::move(result), ticket};
+                    }
+                }
+            }
+        } catch (...) {
+            const std::lock_guard lock(mMutex);
+            if (mSource == source && mSlots[index].ticket == ticket) mFailure = std::current_exception();
         }
-    } catch (...) {
-        const std::lock_guard lock(mMutex);
-        mFailure = std::current_exception();
         mChanged.notify_all();
     }
 }
@@ -141,6 +183,7 @@ std::optional<ChunkPayload> ChunkStreamer::TakeReady() {
         if (slot.state != State::Ready) return std::nullopt;
         auto result = std::move(slot.payload);
         slot = {State::Delivered, std::nullopt};
+        mChanged.notify_all();
         return result;
     }
     return std::nullopt;
@@ -148,7 +191,7 @@ std::optional<ChunkPayload> ChunkStreamer::TakeReady() {
 
 bool ChunkStreamer::Wants(std::size_t index) const {
     const std::lock_guard lock(mMutex);
-    return mSlots[index].state != State::Empty;
+    return index < mSlots.size() && mSlots[index].state != State::Empty;
 }
 
 ChunkQueueStats ChunkStreamer::Statistics() const {
