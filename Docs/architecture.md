@@ -30,7 +30,7 @@
 
 ## 第 13–14 章扩展
 
-`GltfAsset` 将静态 glTF 的节点变换烘入网格，按 primitive 保留 UV 与材质引用。`WorldRenderer` 为资产原型上传网格与材质，为场景实例保留各自的 uniform。JSON 保存相对路径和变换，`WalkController` 用同一个桥实例查局部桥面与引道高度。 [第 13 章教程](../Chapters/ch13/README.md)
+`GltfAsset` 将静态 glTF 的节点变换烘入网格，按 primitive 保留 UV 与材质引用。`WorldRenderer` 组织渲染通道，`PropRenderer` 为原型上传网格与材质，并为场景实例保留各自的 uniform。JSON 保存相对路径和变换，`WalkController` 用同一个桥实例查局部桥面与引道高度。 [第 13 章教程](../Chapters/ch13/README.md)
 
 `WorldRenderer` 在水可见时保留相机深度。`WaterRenderer` 在单独的通道采样该深度，用逆视图投影重建水下落点，再把半透明水面叠加到已有的颜色。环境 Cubemap 与天空共享。 [第 14 章教程](../Chapters/ch14/README.md)
 
@@ -56,8 +56,8 @@
 
 ## 第 20 章扩展
 
-`ChunkStreamer` 高度、道路或种植参数变化时创建不可变的 CPU 源，围绕角色或环绕目标维护最多 25 个有效需求。后台线程从同一块键准备地形两档网格、路面和植被实例，发布时确认源与需求仍匹配。渲染线程先逐出范围外资源，再按最近优先每帧上传最多两块。步行和笔刷继续使用完整 CPU 高度场。 [第 20 章教程](../Chapters/ch20/README.md)
+第 20 章从 48 米的世界包启动。后台 `ChunkStreamer` 按块键查 `ChunkCache`，缺块时读取并解压 `.twchunk`，再构建地形网格和植被实例。CPU 缓存上限为 49 块。主线程在 `TerrainStreaming.cpp` 里逐出 5 × 5 窗口以外的 GPU 资源，每帧最多上传两块。步行控制器会预查目标落脚点，等它所在的块就绪再迈步。 [第 20 章教程](../Chapters/ch20/README.md)
 
 ## 第 21 章扩展
 
-`TerrainGrid` 保存活动地图的块键范围、样点行宽和世界尺寸。版本 9 场景把第 17 章的 48 米山谷按原坐标放入 80 米地图，沿主路延伸林地与海岬。加载会同步切换地形、道路遮罩、水面范围和 CPU 步行边界。使用 `WalkCapstone` 按正式控制器复走存档，GPU 基准在共同区域比较两图整帧耗时、场景绘制调用和驻留峰值，并验收尺寸来回切换。 [第 21 章教程](../Chapters/ch21/README.md)
+`TerrainGrid` 保存活动地图的块键范围、样点行宽和世界尺寸。第 21 章默认加载由 80 米源场景打包而来的 1,024 米探索地图，地形按 32 米块划分。地形使用四档 LOD，远景阴影通过四级级联绘制。`RenderCoordinates` 提供相机相对坐标。`--verify-tour` 从源场景保存重开并复走，`--benchmark-capstone` 对比 48 米和 1,024 米两份磁盘地图，并检查切换时的渲染与驻留。 [第 21 章教程](../Chapters/ch21/README.md)
