@@ -109,7 +109,7 @@ $env:VCPKG_ROOT = (Resolve-Path .tools\vcpkg).Path
 cmake --preset windows-x64-vs2022
 ```
 
-打开 `out/build/windows-x64-vs2022/TinyWorld.sln`，选择 `Debug | x64`。启动项目是 `TinyWorld`，默认运行第 02 章。在 `Editor/main.cpp` 或 `Chapters/ch02/src/SandboxRenderer.cpp` 设置断点后按 **F5** 调试。按 **Ctrl+F5** 直接运行。在 `TinyWorld` 项目的「属性 → 调试 → 命令参数」中修改 `--chapter` 的章号即可切换。
+打开 `out/build/windows-x64-vs2022/TinyWorld.sln`，选择 `Debug | x64`。启动项目是 `TinyWorld`，默认运行第 02 章。在 `Editor/main.cpp` 或 `Engine/Renderer/SandboxRenderer.cpp` 设置断点后按 **F5** 调试。按 **Ctrl+F5** 直接运行。在 `TinyWorld` 项目的「属性 → 调试 → 命令参数」中修改 `--chapter` 的章号即可切换。
 
 ## 目录
 

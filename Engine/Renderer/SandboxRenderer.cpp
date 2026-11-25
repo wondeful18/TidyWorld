@@ -1,4 +1,4 @@
-#include "Chapters/ch02/src/SandboxRenderer.h"
+#include "Engine/Renderer/SandboxRenderer.h"
 
 #include "Engine/Renderer/Color.h"
 #include "Engine/Renderer/RenderCoordinates.h"

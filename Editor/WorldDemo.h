@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Chapters/ch02/src/SandboxRenderer.h"
+#include "Engine/Renderer/SandboxRenderer.h"
 #include "Editor/ChapterPresets.h"
 #include "Editor/WorldEditor.h"
 #include "Engine/Renderer/WorldRenderer.h"

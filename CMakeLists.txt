@@ -24,7 +24,6 @@ find_package(Threads REQUIRED)
 find_package(lz4 CONFIG REQUIRED)
 
 add_library(TinyWorldEngine STATIC
-    Chapters/ch02/src/SandboxDrive.cpp
     Engine/Core/Log.cpp
     Engine/Core/Log.h
     Engine/Platform/ExecutablePath.cpp
@@ -91,10 +90,11 @@ add_library(TinyWorldEngine STATIC
     Engine/Scene/RoamingCar.h
     Engine/Scene/RoamingCarMesh.cpp
     Engine/Scene/RoamingCarMesh.h
-    Engine/Scene/SceneMesh.cpp
-    Engine/Scene/SceneMesh.h
+    Engine/Scene/SandboxDrive.cpp
     Engine/Scene/SceneFile.cpp
     Engine/Scene/SceneFile.h
+    Engine/Scene/SceneMesh.cpp
+    Engine/Scene/SceneMesh.h
     Engine/Scene/Transform.cpp
     Engine/Scene/Transform.h
     Engine/Scene/WaterSettings.h
@@ -136,11 +136,6 @@ if(APPLE)
 endif()
 
 add_executable(TinyWorld
-    Chapters/ch02/src/SandboxPresets.cpp
-    Chapters/ch02/src/SandboxPresets.h
-    Chapters/ch02/src/SandboxRenderer.cpp
-    Chapters/ch02/src/SandboxRenderer.h
-    Chapters/ch02/src/sandbox.wgsl
     Editor/Benchmarks.cpp
     Editor/Benchmarks.h
     Editor/ChapterPresets.cpp
@@ -148,6 +143,8 @@ add_executable(TinyWorld
     Editor/InspectorPanels.cpp
     Editor/PropTool.cpp
     Editor/RoadTool.cpp
+    Editor/SandboxPresets.cpp
+    Editor/SandboxPresets.h
     Editor/ScenePanels.cpp
     Editor/TerrainTool.cpp
     Editor/ViewportTools.cpp
@@ -166,6 +163,8 @@ add_executable(TinyWorld
     Editor/WorldEditor.cpp
     Editor/WorldEditor.h
     Editor/main.cpp
+    Engine/Renderer/SandboxRenderer.cpp
+    Engine/Renderer/SandboxRenderer.h
     Assets/Shaders/triangle.wgsl
     Assets/Shaders/sky.wgsl
     Assets/Shaders/world.wgsl
@@ -177,6 +176,7 @@ add_executable(TinyWorld
     Assets/Shaders/prop_gltf.wgsl
     Assets/Shaders/vegetation.wgsl
     Assets/Shaders/water.wgsl
+    Assets/Shaders/sandbox.wgsl
     Assets/Shaders/fog.wgsl
 )
 target_link_libraries(TinyWorld PRIVATE TinyWorldEngine tinyworld_imguizmo)
@@ -210,9 +210,6 @@ endforeach()
 
 foreach(shader triangle world sky water fog output_color tone_mapping shadow pbr terrain prop_gltf vegetation sandbox)
     set(shader_source "${PROJECT_SOURCE_DIR}/Assets/Shaders/${shader}.wgsl")
-    if(shader STREQUAL "sandbox")
-        set(shader_source "${PROJECT_SOURCE_DIR}/Chapters/ch02/src/sandbox.wgsl")
-    endif()
     set(shader_output "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${shader}.wgsl")
     add_custom_command(OUTPUT "${shader_output}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"

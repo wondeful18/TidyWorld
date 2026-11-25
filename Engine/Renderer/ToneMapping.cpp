@@ -49,7 +49,7 @@ WGPUTextureView ToneMapping::SceneTarget(PixelSize size) {
     if (!sceneView) throw std::runtime_error("Cannot create HDR scene view.");
 
     BindGroupLayoutHandle layout(wgpuRenderPipelineGetBindGroupLayout(mPipeline.get(), 0));
-    std::array<WGPUBindGroupEntry, 2> entries{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+    std::array<WGPUBindGroupEntry, 2> entries{{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
     entries[0].textureView = sceneView.get();
     entries[1].binding = 1;
     entries[1].buffer = mSettings.get();

@@ -1,6 +1,6 @@
 #include "Editor/ChapterPresets.h"
 
-#include "Chapters/ch02/src/SandboxPresets.h"
+#include "Editor/SandboxPresets.h"
 
 #include "Engine/Scene/Capstone.h"
 #include "Engine/Scene/DayCycle.h"

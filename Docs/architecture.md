@@ -18,15 +18,15 @@
 
 ## 第 2 章扩展
 
-`Engine/Scene` 维护可编辑的 CPU 场景、相机和变换。`WorldRenderer` 上传模型并写入每物体的 uniform，按场景像素尺寸匹配深度附件。`WorldEditor` 修改同一份场景，并在原有 ImGui 视口中放置 ImGuizmo。构建阶段的 `TinyWorldMeshPacker` 将原始 GLB 转为顶点包，程序从可执行文件邻近目录加载。应用用 `--chapter` 选择内容，各章复用窗口、事件循环、UI 合成和回读。 [第 02 章教程](../Chapters/ch02/README.md)
+`Engine/Scene` 维护可编辑的 CPU 场景、相机和变换。`SandboxRenderer` 上传模型并写入每物体的 uniform，按场景像素尺寸匹配深度附件。`WorldEditor` 修改同一份场景，并在原有 ImGui 视口中放置 ImGuizmo。构建阶段的 `TinyWorldMeshPacker` 将原始 GLB 转为顶点包，程序从可执行文件邻近目录加载。应用用 `--chapter` 选择内容，各章复用窗口、事件循环、UI 合成和回读。 [第 02 章教程](../Chapters/ch02/README.md)
 
 ## 第 3 章扩展
 
-`WorldRenderer` 在支持阴影的场景里持有 `SunShadowMap`。太阳深度通道先写入固定尺寸的可采样深度纹理，颜色通道随后读取。两条通道共享物体绑定，只有颜色通道绑定比较采样器与深度视图。小车、太阳和阴影参数来自同一份 CPU 场景，直接呈现与编辑器离屏绘制共用此顺序。 [第 03 章教程](../Chapters/ch03/README.md)
+`SandboxRenderer` 在支持阴影的场景里持有 `SunShadowMap`。太阳深度通道先写入固定尺寸的可采样深度纹理，颜色通道随后读取。两条通道共享物体绑定，只有颜色通道绑定比较采样器与深度视图。小车、太阳和阴影参数来自同一份 CPU 场景，直接呈现与编辑器离屏绘制共用此顺序。 [第 03 章教程](../Chapters/ch03/README.md)
 
 ## 第 4 章扩展
 
-`EnvironmentMap` 在启动时解码实拍全景 JPEG，上传等距柱状原图并重投影到六层 Cubemap。`SkyRenderer` 在物体绘制后选择立方体或球形网格，只保留相机旋转，以远平面深度填充背景。`WorldRenderer` 的环境入口复用 Cubemap，给车漆和玻璃加入不同强度的反射。旧的 `.twmesh` 顶点在上传时扩展为带反射权重的运行时格式。 [第 04 章教程](../Chapters/ch04/README.md)
+`EnvironmentMap` 在启动时解码实拍全景 JPEG，上传等距柱状原图并重投影到六层 Cubemap。`SkyRenderer` 在物体绘制后选择立方体或球形网格，只保留相机旋转，以远平面深度填充背景。`SandboxRenderer` 的环境入口复用 Cubemap，给车漆和玻璃加入不同强度的反射。旧的 `.twmesh` 顶点在上传时扩展为带反射权重的运行时格式。 [第 04 章教程](../Chapters/ch04/README.md)
 
 ## 第 13–14 章扩展
 

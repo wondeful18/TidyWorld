@@ -7,7 +7,7 @@ import json
 import math
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "Assets/Scenes/ch17/porch.json"
 OUTPUT = ROOT / "Assets/Scenes/ch21/tour.json"
 OLD_RADIUS = 24
