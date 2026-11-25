@@ -114,7 +114,7 @@ target_link_libraries(TinyWorld PRIVATE TinyWorldEngine tinyworld_imguizmo)
 if(CMAKE_GENERATOR MATCHES "^Visual Studio")
     set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT TinyWorld)
     set_target_properties(TinyWorld PROPERTIES
-        VS_DEBUGGER_COMMAND_ARGUMENTS "--chapter 02"
+        VS_DEBUGGER_COMMAND_ARGUMENTS "--chapter 03"
         VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:TinyWorld>"
     )
     foreach(target TinyWorldEngine TinyWorld)
