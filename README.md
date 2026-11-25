@@ -6,50 +6,49 @@ Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索�
 
 ## 课程入口
 
-| 章节 | 内容 | 教程 | PDF |
-| --- | --- | --- | --- |
-| 01 | 从空窗口到第一个三角形 | [从 Step 1 开始](Chapters/ch01/README.md) · [分步源码与工程入口](Chapters/ch01/src/README.md) | [第 01 章](Chapters/ch01/ch01.pdf) |
-| 02 | 第一间小屋，第一棵树 | [教程与运行步骤](Chapters/ch02/README.md) | [第 02 章](Chapters/ch02/ch02.pdf) |
-| 03 | 阳光与阴影 | [教程与回读对照](Chapters/ch03/README.md) | [第 03 章](Chapters/ch03/ch03.pdf) |
-| 04 | 天空盒与环境贴图 | [教程与回读对照](Chapters/ch04/README.md) | [第 04 章](Chapters/ch04/ch04.pdf) |
-| 05 | 保存场景与步行检查 | [教程与运行步骤](Chapters/ch05/README.md) | [第 05 章](Chapters/ch05/ch05.pdf) |
-| 06 | 分块高度场与地面行走 | [教程与跨块检查](Chapters/ch06/README.md) | [第 06 章](Chapters/ch06/ch06.pdf) |
-| 07 | 雕刻山脊与河谷 | [教程与山谷存档](Chapters/ch07/README.md) | [第 07 章](Chapters/ch07/ch07.pdf) |
-| 08 | 地表材质与 PBR | [教程与材质对照](Chapters/ch08/README.md) | [第 08 章](Chapters/ch08/ch08.pdf) |
-| 09 | 顺着山势铺路 | [教程与避让遮罩](Chapters/ch09/README.md) | [第 09 章](Chapters/ch09/ch09.pdf) |
-| 10 | 在山谷里摆放场景物体 | [教程与三轴手柄](Chapters/ch10/README.md) | [第 10 章](Chapters/ch10/ch10.pdf) |
-| 11 | 草地、林缘与实例化 | [教程与实例化对照](Chapters/ch11/README.md) | [第 11 章](Chapters/ch11/ch11.pdf) |
-| 12 | 按地形规则生成生态 | [教程与道路避让](Chapters/ch12/README.md) | [第 12 章](Chapters/ch12/ch12.pdf) |
-| 13 | 用 glTF 搭村庄与桥 | [教程与跨桥验收](Chapters/ch13/README.md) | [第 13 章](Chapters/ch13/ch13.pdf) |
-| 14 | 湖泊、溪流与岸边 | [教程与水面对照](Chapters/ch14/README.md) | [第 14 章](Chapters/ch14/ch14.pdf) |
-| 15 | 河口与海岸 | [教程、河口与步行验收](Chapters/ch15/README.md) | [第 15 章](Chapters/ch15/ch15.pdf) |
-| 16 | 用阳光和雾做远近层次 | [教程与固定机位对照](Chapters/ch16/README.md) | [第 16 章](Chapters/ch16/ch16.pdf) |
-| 17 | 手写简单的光照贴图烘焙 | [教程与门廊对照](Chapters/ch17/README.md) | [第 17 章](Chapters/ch17/ch17.pdf) |
-| 18 | 让山谷从白天走到夜晚 | [教程与固定机位三时刻对照](Chapters/ch18/README.md) | [第 18 章](Chapters/ch18/ch18.pdf) |
-| 19 | 地形 LOD 与可见块裁剪 | [教程与路线基准](Chapters/ch19/README.md) | [第 19 章](Chapters/ch19/ch19.pdf) |
-| 20 | 分块加载与卸载 | [教程与驻留路线验收](Chapters/ch20/README.md) | [第 20 章](Chapters/ch20/ch20.pdf) |
-| 21 | 结业漫游与性能验收 | [教程、存档复走与性能记录](Chapters/ch21/README.md) | [第 21 章](Chapters/ch21/ch21.pdf) |
+| 章节 | 内容 | 教程 | PDF | 章分支 |
+| --- | --- | --- | --- | --- |
+| 01 | 从空窗口到第一个三角形 | [从 Step 1 开始](Chapters/ch01/README.md) · [分步源码与工程入口](Chapters/ch01/src/README.md) | [第 01 章](Chapters/ch01/ch01.pdf) | [`ch01`](https://github.com/wondeful18/TidyWorld/tree/ch01) |
+| 02 | 第一间小屋，第一棵树 | [教程与运行步骤](Chapters/ch02/README.md) | [第 02 章](Chapters/ch02/ch02.pdf) | [`ch02`](https://github.com/wondeful18/TidyWorld/tree/ch02) |
+| 03 | 阳光与阴影 | [教程与回读对照](Chapters/ch03/README.md) | [第 03 章](Chapters/ch03/ch03.pdf) | [`ch03`](https://github.com/wondeful18/TidyWorld/tree/ch03) |
+| 04 | 天空盒与环境贴图 | [教程与回读对照](Chapters/ch04/README.md) | [第 04 章](Chapters/ch04/ch04.pdf) | [`ch04`](https://github.com/wondeful18/TidyWorld/tree/ch04) |
+| 05 | 保存场景与步行检查 | [教程与运行步骤](Chapters/ch05/README.md) | [第 05 章](Chapters/ch05/ch05.pdf) | [`ch05`](https://github.com/wondeful18/TidyWorld/tree/ch05) |
+| 06 | 分块高度场与地面行走 | [教程与跨块检查](Chapters/ch06/README.md) | [第 06 章](Chapters/ch06/ch06.pdf) | [`ch06`](https://github.com/wondeful18/TidyWorld/tree/ch06) |
+| 07 | 雕刻山脊与河谷 | [教程与山谷存档](Chapters/ch07/README.md) | [第 07 章](Chapters/ch07/ch07.pdf) | [`ch07`](https://github.com/wondeful18/TidyWorld/tree/ch07) |
+| 08 | 地表材质与 PBR | [教程与材质对照](Chapters/ch08/README.md) | [第 08 章](Chapters/ch08/ch08.pdf) | [`ch08`](https://github.com/wondeful18/TidyWorld/tree/ch08) |
+| 09 | 顺着山势铺路 | [教程与避让遮罩](Chapters/ch09/README.md) | [第 09 章](Chapters/ch09/ch09.pdf) | [`ch09`](https://github.com/wondeful18/TidyWorld/tree/ch09) |
+| 10 | 在山谷里摆放场景物体 | [教程与三轴手柄](Chapters/ch10/README.md) | [第 10 章](Chapters/ch10/ch10.pdf) | [`ch10`](https://github.com/wondeful18/TidyWorld/tree/ch10) |
+| 11 | 草地、林缘与实例化 | [教程与实例化对照](Chapters/ch11/README.md) | [第 11 章](Chapters/ch11/ch11.pdf) | [`ch11`](https://github.com/wondeful18/TidyWorld/tree/ch11) |
+| 12 | 按地形规则生成生态 | [教程与道路避让](Chapters/ch12/README.md) | [第 12 章](Chapters/ch12/ch12.pdf) | [`ch12`](https://github.com/wondeful18/TidyWorld/tree/ch12) |
+| 13 | 用 glTF 搭村庄与桥 | [教程与跨桥验收](Chapters/ch13/README.md) | [第 13 章](Chapters/ch13/ch13.pdf) | [`ch13`](https://github.com/wondeful18/TidyWorld/tree/ch13) |
+| 14 | 湖泊、溪流与岸边 | [教程与水面对照](Chapters/ch14/README.md) | [第 14 章](Chapters/ch14/ch14.pdf) | [`ch14`](https://github.com/wondeful18/TidyWorld/tree/ch14) |
+| 15 | 河口与海岸 | [教程、河口与步行验收](Chapters/ch15/README.md) | [第 15 章](Chapters/ch15/ch15.pdf) | [`ch15`](https://github.com/wondeful18/TidyWorld/tree/ch15) |
+| 16 | 用阳光和雾做远近层次 | [教程与固定机位对照](Chapters/ch16/README.md) | [第 16 章](Chapters/ch16/ch16.pdf) | [`ch16`](https://github.com/wondeful18/TidyWorld/tree/ch16) |
+| 17 | 手写简单的光照贴图烘焙 | [教程与门廊对照](Chapters/ch17/README.md) | [第 17 章](Chapters/ch17/ch17.pdf) | [`ch17`](https://github.com/wondeful18/TidyWorld/tree/ch17) |
+| 18 | 让山谷从白天走到夜晚 | [教程与固定机位三时刻对照](Chapters/ch18/README.md) | [第 18 章](Chapters/ch18/ch18.pdf) | [`ch18`](https://github.com/wondeful18/TidyWorld/tree/ch18) |
+| 19 | 地形 LOD 与可见块裁剪 | [教程与路线基准](Chapters/ch19/README.md) | [第 19 章](Chapters/ch19/ch19.pdf) | [`ch19`](https://github.com/wondeful18/TidyWorld/tree/ch19) |
+| 20 | 分块加载与卸载 | [教程与驻留路线验收](Chapters/ch20/README.md) | [第 20 章](Chapters/ch20/ch20.pdf) | [`ch20`](https://github.com/wondeful18/TidyWorld/tree/ch20) |
+| 21 | 结业漫游与性能验收 | [教程、存档复走与性能记录](Chapters/ch21/README.md) | [第 21 章](Chapters/ch21/ch21.pdf) | [`ch21`](https://github.com/wondeful18/TidyWorld/tree/ch21) |
 
 [前言](Chapters/PREFACE.md) · [21 章合订版 PDF](Chapters/TinyWorld.pdf) · [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
-## 获取源码与历史快照
+## 获取源码
 
-首次下载时使用完整克隆。从根目录构建一次，通过 `--chapter` 切换章节。各章教程给出对应的源码目录、资源和历史提交。
+在 `main` 阅读讲义并跟做实验。从仓库根目录构建一次，再用 `--chapter` 切换章节。
 
 ```sh
 git clone --branch main https://github.com/wondeful18/TidyWorld.git
 cd TidyWorld
 ```
 
-要对照旧实现，可在仓库根目录将某章教程列出的提交检出到相邻的工作树。下面以第 20 章为例。
+想单独研究某一章的实现，可以打开对应的 `ch01`–`ch21` 分支。章分支默认运行本章，README 列出该分支的源码入口和构建方法。例如，把第 20 章放到相邻目录：
 
 ```sh
-git fetch origin main
-git worktree add --detach ../TidyWorld-ch20 715ba7c
-cd ../TidyWorld-ch20
+git fetch origin
+git worktree add --detach ../TidyWorld-ch20 origin/ch20
 ```
 
-第 03–09 章和第 10–12 章分别共享一个最早可运行的提交。第 13–21 章各有一个完成提交。本地已有对应的 `ch13`–`ch21` 标签时，也可直接用标签检出。
+第 13 章的法线贴图实验，以及第 18 章的跟随提灯和 HDR 曝光实验，使用 `main`。
 
 ## 构建与运行完整工程
 
