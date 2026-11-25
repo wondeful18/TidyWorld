@@ -105,9 +105,9 @@ WaterRenderer::WaterRenderer(WebGpuContext& gpu, WGPUTextureFormat format, const
                              const std::filesystem::path& shaderPath, bool coast)
     : mGpu(gpu), mEnvironment(environment) {
     const auto shader = LoadWgslModule(gpu, shaderPath, shaderPath.parent_path() / "fog.wgsl");
-    std::array<WGPUBindGroupLayoutEntry, 2> entries{
+    std::array<WGPUBindGroupLayoutEntry, 2> entries{{
         WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-    };
+    }};
     entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
     entries[0].buffer.type = WGPUBufferBindingType_Uniform;
     entries[0].buffer.minBindingSize = sizeof(WaterUniform);
@@ -174,7 +174,7 @@ void WaterRenderer::Encode(WGPUCommandEncoder encoder, WGPUTextureView target, W
                            const glm::mat4& viewProjection, glm::vec3 camera, const WaterSettings& settings,
                            glm::vec3 horizon, const FrameAtmosphere& air, glm::vec4 lighting) {
     if (depthView != mBoundDepth) {
-        std::array<WGPUBindGroupEntry, 2> entries{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+        std::array<WGPUBindGroupEntry, 2> entries{{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
         entries[0].buffer = mUniform.get();
         entries[0].size = sizeof(WaterUniform);
         entries[1].binding = 1;
