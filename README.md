@@ -2,39 +2,41 @@
 
 Small Engine, Complete World. 一个从原生空窗口逐步构建到可探索山谷与海岸的 C++20 / WebGPU 教学工程。第 01–21 章均可运行。
 
-![碎石路跨过木桥并沿河口通向海岬](Chapters/ch15/image/coast-overview.jpg)
+![碎石路跨过木桥并沿河口通向海岬](https://raw.githubusercontent.com/wondeful18/TidyWorldBook/main/Chapters/ch15/image/coast-overview.jpg)
 
 ## 课程入口
 
+完整讲义见 [TidyWorldBook](https://github.com/wondeful18/TidyWorldBook)。
+
 | 章节 | 内容 | 教程 | PDF | 章分支 |
 | --- | --- | --- | --- | --- |
-| 01 | 从空窗口到第一个三角形 | [从 Step 1 开始](Chapters/ch01/README.md) · [分步源码与工程入口](Chapters/ch01/src/README.md) | [第 01 章](Chapters/ch01/ch01.pdf) | [`ch01`](https://github.com/wondeful18/TidyWorld/tree/ch01) |
-| 02 | 第一间小屋，第一棵树 | [教程与运行步骤](Chapters/ch02/README.md) | [第 02 章](Chapters/ch02/ch02.pdf) | [`ch02`](https://github.com/wondeful18/TidyWorld/tree/ch02) |
-| 03 | 阳光与阴影 | [教程与回读对照](Chapters/ch03/README.md) | [第 03 章](Chapters/ch03/ch03.pdf) | [`ch03`](https://github.com/wondeful18/TidyWorld/tree/ch03) |
-| 04 | 天空盒与环境贴图 | [教程与回读对照](Chapters/ch04/README.md) | [第 04 章](Chapters/ch04/ch04.pdf) | [`ch04`](https://github.com/wondeful18/TidyWorld/tree/ch04) |
-| 05 | 保存场景与步行检查 | [教程与运行步骤](Chapters/ch05/README.md) | [第 05 章](Chapters/ch05/ch05.pdf) | [`ch05`](https://github.com/wondeful18/TidyWorld/tree/ch05) |
-| 06 | 分块高度场与地面行走 | [教程与跨块检查](Chapters/ch06/README.md) | [第 06 章](Chapters/ch06/ch06.pdf) | [`ch06`](https://github.com/wondeful18/TidyWorld/tree/ch06) |
-| 07 | 雕刻山脊与河谷 | [教程与山谷存档](Chapters/ch07/README.md) | [第 07 章](Chapters/ch07/ch07.pdf) | [`ch07`](https://github.com/wondeful18/TidyWorld/tree/ch07) |
-| 08 | 地表材质与 PBR | [教程与材质对照](Chapters/ch08/README.md) | [第 08 章](Chapters/ch08/ch08.pdf) | [`ch08`](https://github.com/wondeful18/TidyWorld/tree/ch08) |
-| 09 | 顺着山势铺路 | [教程与避让遮罩](Chapters/ch09/README.md) | [第 09 章](Chapters/ch09/ch09.pdf) | [`ch09`](https://github.com/wondeful18/TidyWorld/tree/ch09) |
-| 10 | 在山谷里摆放场景物体 | [教程与三轴手柄](Chapters/ch10/README.md) | [第 10 章](Chapters/ch10/ch10.pdf) | [`ch10`](https://github.com/wondeful18/TidyWorld/tree/ch10) |
-| 11 | 草地、林缘与实例化 | [教程与实例化对照](Chapters/ch11/README.md) | [第 11 章](Chapters/ch11/ch11.pdf) | [`ch11`](https://github.com/wondeful18/TidyWorld/tree/ch11) |
-| 12 | 按地形规则生成生态 | [教程与道路避让](Chapters/ch12/README.md) | [第 12 章](Chapters/ch12/ch12.pdf) | [`ch12`](https://github.com/wondeful18/TidyWorld/tree/ch12) |
-| 13 | 用 glTF 搭村庄与桥 | [教程与跨桥验收](Chapters/ch13/README.md) | [第 13 章](Chapters/ch13/ch13.pdf) | [`ch13`](https://github.com/wondeful18/TidyWorld/tree/ch13) |
-| 14 | 湖泊、溪流与岸边 | [教程与水面对照](Chapters/ch14/README.md) | [第 14 章](Chapters/ch14/ch14.pdf) | [`ch14`](https://github.com/wondeful18/TidyWorld/tree/ch14) |
-| 15 | 河口与海岸 | [教程、河口与步行验收](Chapters/ch15/README.md) | [第 15 章](Chapters/ch15/ch15.pdf) | [`ch15`](https://github.com/wondeful18/TidyWorld/tree/ch15) |
-| 16 | 用阳光和雾做远近层次 | [教程与固定机位对照](Chapters/ch16/README.md) | [第 16 章](Chapters/ch16/ch16.pdf) | [`ch16`](https://github.com/wondeful18/TidyWorld/tree/ch16) |
-| 17 | 手写简单的光照贴图烘焙 | [教程与门廊对照](Chapters/ch17/README.md) | [第 17 章](Chapters/ch17/ch17.pdf) | [`ch17`](https://github.com/wondeful18/TidyWorld/tree/ch17) |
-| 18 | 让山谷从白天走到夜晚 | [教程与固定机位三时刻对照](Chapters/ch18/README.md) | [第 18 章](Chapters/ch18/ch18.pdf) | [`ch18`](https://github.com/wondeful18/TidyWorld/tree/ch18) |
-| 19 | 地形 LOD 与可见块裁剪 | [教程与路线基准](Chapters/ch19/README.md) | [第 19 章](Chapters/ch19/ch19.pdf) | [`ch19`](https://github.com/wondeful18/TidyWorld/tree/ch19) |
-| 20 | 分块加载与卸载 | [教程与驻留路线验收](Chapters/ch20/README.md) | [第 20 章](Chapters/ch20/ch20.pdf) | [`ch20`](https://github.com/wondeful18/TidyWorld/tree/ch20) |
-| 21 | 结业漫游与性能验收 | [教程、存档复走与性能记录](Chapters/ch21/README.md) | [第 21 章](Chapters/ch21/ch21.pdf) | [`ch21`](https://github.com/wondeful18/TidyWorld/tree/ch21) |
+| 01 | 从空窗口到第一个三角形 | [从 Step 1 开始](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/README.md) · [分步工程说明](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/src/README.md) | [第 01 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/ch01.pdf) | [`ch01`](https://github.com/wondeful18/TidyWorld/tree/ch01) |
+| 02 | 第一间小屋，第一棵树 | [教程与运行步骤](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch02/README.md) | [第 02 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch02/ch02.pdf) | [`ch02`](https://github.com/wondeful18/TidyWorld/tree/ch02) |
+| 03 | 阳光与阴影 | [教程与回读对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch03/README.md) | [第 03 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch03/ch03.pdf) | [`ch03`](https://github.com/wondeful18/TidyWorld/tree/ch03) |
+| 04 | 天空盒与环境贴图 | [教程与回读对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch04/README.md) | [第 04 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch04/ch04.pdf) | [`ch04`](https://github.com/wondeful18/TidyWorld/tree/ch04) |
+| 05 | 保存场景与步行检查 | [教程与运行步骤](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch05/README.md) | [第 05 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch05/ch05.pdf) | [`ch05`](https://github.com/wondeful18/TidyWorld/tree/ch05) |
+| 06 | 分块高度场与地面行走 | [教程与跨块检查](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch06/README.md) | [第 06 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch06/ch06.pdf) | [`ch06`](https://github.com/wondeful18/TidyWorld/tree/ch06) |
+| 07 | 雕刻山脊与河谷 | [教程与山谷存档](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch07/README.md) | [第 07 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch07/ch07.pdf) | [`ch07`](https://github.com/wondeful18/TidyWorld/tree/ch07) |
+| 08 | 地表材质与 PBR | [教程与材质对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch08/README.md) | [第 08 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch08/ch08.pdf) | [`ch08`](https://github.com/wondeful18/TidyWorld/tree/ch08) |
+| 09 | 顺着山势铺路 | [教程与避让遮罩](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch09/README.md) | [第 09 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch09/ch09.pdf) | [`ch09`](https://github.com/wondeful18/TidyWorld/tree/ch09) |
+| 10 | 在山谷里摆放场景物体 | [教程与三轴手柄](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch10/README.md) | [第 10 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch10/ch10.pdf) | [`ch10`](https://github.com/wondeful18/TidyWorld/tree/ch10) |
+| 11 | 草地、林缘与实例化 | [教程与实例化对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch11/README.md) | [第 11 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch11/ch11.pdf) | [`ch11`](https://github.com/wondeful18/TidyWorld/tree/ch11) |
+| 12 | 按地形规则生成生态 | [教程与道路避让](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch12/README.md) | [第 12 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch12/ch12.pdf) | [`ch12`](https://github.com/wondeful18/TidyWorld/tree/ch12) |
+| 13 | 用 glTF 搭村庄与桥 | [教程与跨桥验收](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch13/README.md) | [第 13 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch13/ch13.pdf) | [`ch13`](https://github.com/wondeful18/TidyWorld/tree/ch13) |
+| 14 | 湖泊、溪流与岸边 | [教程与水面对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch14/README.md) | [第 14 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch14/ch14.pdf) | [`ch14`](https://github.com/wondeful18/TidyWorld/tree/ch14) |
+| 15 | 河口与海岸 | [教程、河口与步行验收](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch15/README.md) | [第 15 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch15/ch15.pdf) | [`ch15`](https://github.com/wondeful18/TidyWorld/tree/ch15) |
+| 16 | 用阳光和雾做远近层次 | [教程与固定机位对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch16/README.md) | [第 16 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch16/ch16.pdf) | [`ch16`](https://github.com/wondeful18/TidyWorld/tree/ch16) |
+| 17 | 手写简单的光照贴图烘焙 | [教程与门廊对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch17/README.md) | [第 17 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch17/ch17.pdf) | [`ch17`](https://github.com/wondeful18/TidyWorld/tree/ch17) |
+| 18 | 让山谷从白天走到夜晚 | [教程与固定机位三时刻对照](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch18/README.md) | [第 18 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch18/ch18.pdf) | [`ch18`](https://github.com/wondeful18/TidyWorld/tree/ch18) |
+| 19 | 地形 LOD 与可见块裁剪 | [教程与路线基准](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch19/README.md) | [第 19 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch19/ch19.pdf) | [`ch19`](https://github.com/wondeful18/TidyWorld/tree/ch19) |
+| 20 | 分块加载与卸载 | [教程与驻留路线验收](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch20/README.md) | [第 20 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch20/ch20.pdf) | [`ch20`](https://github.com/wondeful18/TidyWorld/tree/ch20) |
+| 21 | 结业漫游与性能验收 | [教程、存档复走与性能记录](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch21/README.md) | [第 21 章](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch21/ch21.pdf) | [`ch21`](https://github.com/wondeful18/TidyWorld/tree/ch21) |
 
-[前言](Chapters/PREFACE.md) · [21 章合订版 PDF](Chapters/TinyWorld.pdf) · [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
+[前言](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/PREFACE.md) · [21 章合订版 PDF](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/TinyWorld.pdf) · [课程总览](COURSE_OVERVIEW.md) · [课程详细路线](Docs/roadmap.md) · [项目架构](Docs/architecture.md)
 
 ## 获取源码
 
-在 `main` 阅读讲义并跟做实验。从仓库根目录构建一次，再用 `--chapter` 切换章节。
+阅读书稿时，可以用 `main` 跟做各章实验。从仓库根目录构建一次，再用 `--chapter` 切换章节。
 
 ```sh
 git clone --branch main https://github.com/wondeful18/TidyWorld.git
@@ -52,7 +54,7 @@ git worktree add --detach ../TidyWorld-ch20 origin/ch20
 
 ## 构建与运行完整工程
 
-按第 01 章准备编译工具、CMake 与 vcpkg，并设置 `VCPKG_ROOT`。也可以安装 Ninja，在 macOS arm64 从仓库根目录使用以下命令。 [Visual Studio 和 Xcode 的工程生成方法](Chapters/ch01/README.md#step-1--用-cmake-打开第一扇窗口)
+按第 01 章准备编译工具、CMake 与 vcpkg，并设置 `VCPKG_ROOT`。也可以安装 Ninja，在 macOS arm64 从仓库根目录使用以下命令。 [Visual Studio 和 Xcode 的工程生成方法](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/README.md#step-1--用-cmake-打开第一扇窗口)
 
 ```sh
 export VCPKG_ROOT="$PWD/.tools/vcpkg"
@@ -114,5 +116,5 @@ cmake --preset windows-x64-vs2022
 
 - `Engine/` 和 `Editor/` 保存引擎与编辑器源码，`Runtime/` 保存步行控制器。
 - `Assets/` 保存着色器和课程模型，`Tools/` 保存离线工具。
-- `Chapters/` 保存 Markdown 教程、PDF 和插图，`Docs/` 保存路线与技术决策。
+- `Chapters/ch01/src/` 保存第 01 章的分步工程，`Docs/` 保存路线与技术决策。
 - 本机工具装在 `.tools/`，preset 将构建产物写到 `out/`。两个目录都由 Git 忽略。

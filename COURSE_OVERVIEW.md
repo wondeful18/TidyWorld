@@ -8,9 +8,9 @@
 2. 在路线图中查看本章的先修内容、必做功能、验收标准和扩展实验。 [课程详细路线](Docs/roadmap.md)
 3. 开发第 1 章时，按 Milestone 0–5 实施与验证。 [第一章开工提示词](Docs/ch01-kickoff-prompt.md)
 
-**第 01–21 章均已实现。** 从 glTF 村庄走过木桥，沿碎石路可以到达海岬观景点。回到山脊后，可用同一机位比较阳光、阴影距离和距离雾在村庄、林地与远岸上的效果。第 17 章可比较门廊固定灯在烘焙前后的光斑与柱影。第 18 章从同一机位观察日出、正午和夜晚，门廊灯在天黑后依然照亮地板。第 19 章用同一四站路线比较地形两档 LOD 和视锥裁剪。第 20 章沿固定块键路线检查真实读盘、CPU 缓存和 GPU 逐出。第 21 章在 1 公里地图上从山脊走到海岬，并在同一机位比较级联阴影与坐标精度。 [章节入口](README.md#课程入口) · [前言](Chapters/PREFACE.md) · [21 章合订版 PDF](Chapters/TinyWorld.pdf)
+**第 01–21 章均已实现。** 从 glTF 村庄走过木桥，沿碎石路可以到达海岬观景点。回到山脊后，可用同一机位比较阳光、阴影距离和距离雾在村庄、林地与远岸上的效果。第 17 章可比较门廊固定灯在烘焙前后的光斑与柱影。第 18 章从同一机位观察日出、正午和夜晚，门廊灯在天黑后依然照亮地板。第 19 章用同一四站路线比较地形两档 LOD 和视锥裁剪。第 20 章沿固定块键路线检查真实读盘、CPU 缓存和 GPU 逐出。第 21 章在 1 公里地图上从山脊走到海岬，并在同一机位比较级联阴影与坐标精度。 [章节入口](README.md#课程入口) · [前言](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/PREFACE.md) · [21 章合订版 PDF](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/TinyWorld.pdf)
 
-前几章沿用同一个小场景。第 1 章的每一步都有源码或正式工程入口。第 2 章从三角形走到可编辑的 3D 场景，第 3 章给房屋和树加阴影，第 4 章用天空和车身反射讲环境贴图。第 5 章保存这座场景，在出生点进入第三人称步行。 [第 1 章分步源码](Chapters/ch01/src/README.md) · [第 5 章教程](Chapters/ch05/README.md)
+前几章沿用同一个小场景。第 1 章的每一步都有源码或正式工程入口。第 2 章从三角形走到可编辑的 3D 场景，第 3 章给房屋和树加阴影，第 4 章用天空和车身反射讲环境贴图。第 5 章保存这座场景，在出生点进入第三人称步行。 [第 1 章分步工程说明](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/src/README.md) · [第 5 章教程](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch05/README.md)
 
 ## 结业作品与技术边界
 
@@ -59,9 +59,9 @@
 ## 工程结构与章节交付
 
 - `Engine/` 保存窗口、渲染、场景和地形数据。`Editor/` 保存 ImGui、编辑器入口和面板，`Runtime/` 保存步行与漫游逻辑。第 17 章的 CPU 烘焙器作为离线工具放在 `Tools/`。
-- `Assets/` 保存共享资源，`Chapters/chNN/` 保存当章教程、运行结果和截图，第 01 章还保留分步源码。第 02–05 章的平地渲染入口是 `Engine/Renderer/SandboxRenderer.cpp`，练习脚本与资产生成工具位于 `Tools/`。最新讲义与实验在 `main`。按章阅读源码时可打开对应的 `ch01`–`ch21` 分支，分支 README 列出当章入口。 [获取源码](README.md#获取源码)
+- `Assets/` 保存共享资源，`Chapters/ch01/src/` 保存第 01 章分步源码，教程、运行结果和截图见 [TidyWorldBook](https://github.com/wondeful18/TidyWorldBook)。第 02–05 章的平地渲染入口是 `Engine/Renderer/SandboxRenderer.cpp`，练习脚本与资产生成工具位于 `Tools/`。各章实验可在源码仓库的 `main` 运行。按章阅读源码时可打开对应的 `ch01`–`ch21` 分支，分支 README 列出当章入口。 [获取源码](README.md#获取源码)
 - 每章从全新构建目录复现构建，再运行本章入口并核对验收项。GPU 创建设备、窗口呈现和交互分开记录，性能对照用固定场景、分辨率和相机路线。教程说明读者可以如何复现结果。
-- 小男孩可以在不同章节的开场、动手观察或结尾出场。沿用深棕短发、芥末黄连帽衫和薄荷绿书包，按当章内容换动作，让他的问题对应读者此时能看到或操作的现象。 [角色参考图](Chapters/ch01/image/tinyworld-boy.png)
+- 小男孩可以在不同章节的开场、动手观察或结尾出场。沿用深棕短发、芥末黄连帽衫和薄荷绿书包，按当章内容换动作，让他的问题对应读者此时能看到或操作的现象。 [角色参考图](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/image/tinyworld-boy.png)
 
 ## 代码结构与中文注释规范
 
