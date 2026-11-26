@@ -4,7 +4,7 @@
 
 先按 [构建说明](https://github.com/wondeful18/TidyWorld/blob/main/README.md#构建与运行完整工程) 配置 CMake 和 vcpkg。Windows 在 Visual Studio 的 x64 开发者终端中用 \`windows-x64-debug\`，macOS 用 \`macos-arm64-debug\`。
 
-[第 06 章讲义](https://github.com/wondeful18/TidyWorld/blob/main/Chapters/ch06/README.md)
+[第 06 章讲义](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch06/README.md)
 
 ## 源码入口
 
