@@ -11,4 +11,4 @@
 
 Release 包的版本、架构和完整 SHA-256 见 CMake 依赖文件。macOS arm64 和 Windows x64 MSVC 两个官方归档均已下载核对摘要。ImGui 的后端以 `IMGUI_IMPL_WEBGPU_BACKEND_WGPU` 编译，macOS 下 WebGPU 后端源文件按 Objective-C++ 编译。项目自己的 Cocoa 和 Win32 桥接使用同包 WebGPU C API 的 Surface 描述符。 [官方发行包](https://github.com/gfx-rs/wgpu-native/releases/tag/v29.0.1.1) · [CMake 依赖文件](../../cmake/Dependencies.cmake)
 
-本机构建工具为 Xcode 26.6 / Apple Clang 21、CMake 4.4.5、Ninja 1.13.2 与 pkgconf 2.5.1。vcpkg 从锁定仓库启动，报告工具版本 `2026-09-26-51bf87ca6`。实际 GPU 为 Apple M4 Pro / Metal。 [第一章实测记录](../../Chapters/ch01/README.md)
+本机构建工具为 Xcode 26.6 / Apple Clang 21、CMake 4.4.5、Ninja 1.13.2 与 pkgconf 2.5.1。vcpkg 从锁定仓库启动，报告工具版本 `2026-09-26-51bf87ca6`。实际 GPU 为 Apple M4 Pro / Metal。 [第一章实测记录](https://github.com/wondeful18/TidyWorldBook/blob/main/Chapters/ch01/README.md)
